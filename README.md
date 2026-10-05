@@ -156,6 +156,29 @@ Excel (admin): the day sheet in the same layout and colours; the date-range repo
 
 Install: run `supabase/update_all_v8.sql` (safe to re-run), then replace `index.html`, `styles.css` and `app.js`.
 
+## Update 9: breakdowns, highlight colours, empty new bill
+
+- **Breakdowns for income and expenses.** Click **+ Breakdown line** to split an entry, e.g. Charity 100 = Mosque 50 +
+  Temple 50. If an amount is already typed, it becomes the first line. The amount is always the total of the lines.
+  To change a breakdown later: **Edit** the entry, change/add lines, × to remove a line, then **Update**.
+- **Highlight colours** on every phone/accessory line (e.g. commission items): None, Green, Yellow, Blue, Pink, Orange,
+  Purple. Shown on the sales rep cell on screen and in Excel; the date-range **Sales by Rep** sheet adds items and
+  amounts per colour for each rep.
+- **New bill starts empty**: the cashier chooses **+ Phone** or **+ Accessory**.
+- Income quick buttons (Cash at shop, Liberty cash, …) removed. Expense quick buttons stay.
+
+Install: run `supabase/update_all_v9.sql` (safe to re-run), then replace `styles.css` and `app.js`.
+
+## Update 10: add / subtract in amounts, colour after saving
+
+- Income and expense amounts (and each breakdown line) accept working like `140+120` or `100-30+5`.
+  Tap **+** or **−** next to the box (handy on phones), type the next amount, and the total shows as `= 260.00`.
+  The working is saved and shown in the list; **Edit** loads it again so you can add `+50` later.
+- Phones / Accessories tables: **Colour** on any saved line opens the highlight colours; picking one saves
+  straight away (no need to edit the bill). Choosing a colour while entering the bill still works too.
+
+Install: run `supabase/update_all_v10.sql` (safe to re-run), then replace `app.js` and `styles.css`.
+
 ## Changing payment types later
 
 Payment types are listed at the top of `app.js` (`PAY`) and as columns in the `sales` table. To add one (for example "BOC"):
