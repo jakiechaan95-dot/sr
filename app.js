@@ -241,6 +241,7 @@ function render() {
   const admin = isAdmin();
   $("exAll").closest(".exportcard").hidden = !admin;
   $("exRange").closest(".exportcard").hidden = !admin;
+  $("lookupPanel").hidden = !admin; // serial & warranty lookup: admin only
   // Staff see today only: no date arrows or picker, just today's date.
   ["prevDay", "nextDay", "todayBtn"].forEach(id => { $(id).hidden = !admin; });
   $("date").disabled = !admin;
