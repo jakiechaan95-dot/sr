@@ -260,3 +260,26 @@ table.denoms tfoot td{font-size:15px}
 .brklist span{display:flex;justify-content:space-between;gap:12px;max-width:280px}
 .brklist b{font-weight:500;font-variant-numeric:tabular-nums}
 @media (max-width:720px){table.ledger.cards td.title{flex-wrap:wrap}.brklist{flex-basis:100%}}
+
+/* amount working: 140+120 */
+.calcbox{display:flex;gap:4px;min-width:0}
+.calcbox .calc-in{flex:1;min-width:0;height:40px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);font-size:15px;text-align:right;font-variant-numeric:tabular-nums}
+.calcbox .calc-in:disabled{opacity:.75}
+.opbtn{width:36px;height:40px;flex:0 0 auto;border:1px solid var(--line);border-radius:7px;background:var(--surface-2);color:var(--ink);font-size:18px;font-weight:600;line-height:1;cursor:pointer}
+.opbtn:hover{border-color:var(--accent);color:var(--accent)}
+.calcres{font-size:12px;color:var(--accent);font-variant-numeric:tabular-nums;min-height:1em;text-align:right}
+.calcres.bad{color:var(--neg)}
+.brklist i{font-style:normal;color:var(--muted);margin-right:4px}
+.brkrow{align-items:start}
+.brkrow .b-del{margin-top:22px}
+
+/* colour picker under a saved line */
+tr.hlpick td{background:var(--surface-2);padding:8px 10px}
+tr.hlpick td{display:table-cell}
+tr.hlpick span{font-size:13px;color:var(--muted);margin-right:8px}
+tr.hlpick .sw{vertical-align:middle;margin-right:4px}
+@media (max-width:720px){
+  table.ledger.cards tr.hlpick{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px}
+  table.ledger.cards tr.hlpick td{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:0;background:none}
+}
+@media (max-width:640px){.brkrow{grid-template-columns:minmax(0,1fr) 40px}.brkrow > label:first-child{grid-column:1/-1}}
