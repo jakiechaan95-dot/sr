@@ -242,6 +242,7 @@ function render() {
   $("exAll").closest(".exportcard").hidden = !admin;
   $("exRange").closest(".exportcard").hidden = !admin;
   $("lookupPanel").hidden = !admin; // serial & warranty lookup: admin only
+  $("exportPanel").hidden = !admin;  // Excel downloads: admin only
   // Staff see today only: no date arrows or picker, just today's date.
   ["prevDay", "nextDay", "todayBtn"].forEach(id => { $(id).hidden = !admin; });
   $("date").disabled = !admin;
@@ -672,20 +673,20 @@ function saveWb(wb, filename) {
 }
 function needXlsx() { if (window.XLSX) return true; $("exMsg").textContent = "The Excel tool did not load. Check your connection and reload."; return false; }
 $("exOne").onclick = () => {
-  if (!needXlsx() || S.branch === "all") return;
+  if (!isAdmin() || !needXlsx() || S.branch === "all") return;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, daySheet(bname(S.branch), S.date, S.days[S.branch]), sheetName(bname(S.branch)));
   saveWb(wb, `Sales ${bname(S.branch)} ${S.date}.xlsx`);
 };
 $("exAll").onclick = () => {
-  if (!needXlsx()) return;
+  if (!isAdmin() || !needXlsx()) return;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, allSheet(S.date, S.days), "All Branches");
   S.branches.forEach(b => XLSX.utils.book_append_sheet(wb, daySheet(b.name, S.date, S.days[b.id]), sheetName(b.name)));
   saveWb(wb, `Sales All Branches ${S.date}.xlsx`);
 };
 $("exRange").onclick = async () => {
-  if (!needXlsx()) return;
+  if (!isAdmin() || !needXlsx()) return;
   const from = $("exFrom").value, to = $("exTo").value;
   if (!from || !to || from > to) { $("exMsg").textContent = "Pick a From date that is on or before the To date."; return; }
   $("exMsg").textContent = "Collecting entries…";
