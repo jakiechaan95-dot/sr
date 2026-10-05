@@ -2,7 +2,7 @@
 
 Daily sales report for 3 branches. Works on phones and computers.
 
-- Sales with payment columns: Cash, Sampath, Amana, Seylan, Commercial, Amex / Web
+- Sales with payment columns: Cash, Sampath, Amana, Seylan, Commercial, Amex, Web
 - Other income and other expenses, each marked cash or bank
 - End-of-day cash summary: opening + cash sales + cash income − cash expenses − banked = expected cash, then counted cash and short/excess
 - "All branches" combined view
@@ -110,107 +110,51 @@ search all branches, so a customer can claim warranty at any branch.
 To add a new staff member later: create the user in Authentication → Users, add a line for them in
 `link_users.sql`, and run it again. To remove access: `delete from public.staff where email = '...';`
 
-## Changing payment types later
+## Update 4: new day, not-today warning, today-only editing
 
-Payment types are listed at the top of `app.js` (`PAY`) and as columns in the `sales` table. To add one (for example "BOC"):
-1. In Supabase SQL Editor run:
-   ```sql
-   alter table public.sales add column boc numeric(14,2) not null default 0;
-   alter table public.other_income drop constraint other_income_method_check;
-   alter table public.expenses drop constraint expenses_method_check;
-   ```
-2. In `app.js` add `{ k: "boc", n: "BOC" }` to `PAY`, then redeploy.
+- The app moves to the new day by itself at midnight, or when a phone is unlocked the next morning
+  (only if it was showing "today"; if someone was looking at an old date it stays there).
+- When the screen shows any date other than today, a warning bar appears with a **Go to today** button.
+- **Branch staff can only add or change today's records.** Past days are read-only for them (the forms hide).
+  **Admin** can still open and fix any day; the bar shows in yellow as a reminder.
+- "Today" is Sri Lanka time (Asia/Colombo) in the database.
 
-Daily sales report for 3 branches. Works on phones and computers.
+Install: run `supabase/update_all.sql` again (it now includes this part; safe to re-run),
+then replace `index.html`, `styles.css` and `app.js`.
 
-- Sales with payment columns: Cash, Sampath, Amana, Seylan, Commercial, Amex / Web
-- Other income and other expenses, each marked cash or bank
-- End-of-day cash summary: opening + cash sales + cash income − cash expenses − banked = expected cash, then counted cash and short/excess
-- "All branches" combined view
-- Excel download: one branch for a day, all branches for a day, or any date range
+## Update 5: Amex and Web are separate
 
-Files:
+Run `supabase/update_all.sql` again (safe to re-run), then replace `app.js` and `styles.css`.
+Old entries that were saved under "Amex / Web" stay under **Amex**; admin can edit them if some were web payments.
 
-| File | What it is |
-|---|---|
-| `index.html`, `styles.css`, `app.js` | The website |
-| `config.js` | Where you paste your Supabase URL and key |
-| `supabase/schema.sql` | Creates the database tables and security rules |
+## Update 6: staff see today only
 
----
+- Branch staff see **only today's** records of their own branch. No date arrows, no date picker,
+  no date-range Excel. Yesterday's opening carry-over still works (the database gives them only the closing number).
+- **Admin** can open, change and export any day for any branch.
+- Serial & warranty lookup and **all Excel downloads** are **admin only** (update 7). Staff still get the duplicate-IMEI warning when saving.
 
-## Step 1: Set up Supabase (about 5 minutes)
+Install: run `supabase/update_all_v7.sql` (safe to re-run), then replace `app.js`.
 
-1. Go to https://supabase.com, sign in, and click **New project**. Pick a name and a database password, and choose the **Singapore** or **Mumbai** region (closest to Sri Lanka).
-2. When the project is ready, open **SQL Editor → New query**. Open `supabase/schema.sql` from this folder, copy everything, paste it in, and click **Run**. You should see "Success".
-3. Turn off public sign-ups so only your staff can log in:
-   **Authentication → Sign In / Providers → Email**. Keep Email enabled, but switch **Allow new users to sign up** OFF. Also switch **Confirm email** OFF if you don't want to confirm each staff email.
-4. Create staff logins:
-   **Authentication → Users → Add user → Create new user**. Enter an email and password for each person (for example one per branch). Tick **Auto Confirm User**.
-5. Copy your keys: **Project Settings → API**. You need the **Project URL** and the **anon public** key.
+## Update 8: works like the daily sheet
 
-## Step 2: Add your keys
+The screen and the Excel file now follow the shop's daily sheet:
 
-Open `config.js` and replace the two placeholder values:
+1. **Header**: branch name, address, day and date (admin sets the address under **Branches**).
+2. **New bill**: bill no., customer, then one line per item. **+ Phone** (IMEI required) or **+ Accessory**.
+   Each line has its own **sales rep**, **warranty** and its own amounts under Cash / Sampath / Amana / Seylan /
+   Commercial / Amex / Web. One bill can mix payment types per line.
+3. **Phones** and **Accessories** tables with subtotals, then **Total card transactions** and **Total sales**.
+4. **Income**: "Yesterday cash" is filled automatically; add Cash at shop, Liberty cash, other-branch cash, etc.
+5. **Expenses**: quick buttons for Transfer - Amana/Seylan/Sampath, Boss, Breakfast & lunch, PickMe, Transport,
+   Delivery, Salary. Any expense can have a **breakdown** (e.g. lunch per person); its amount is the sum.
+6. **Summary**: Total sales + Other income − Expenses = Net sales − Card transactions = **Cash in hand**.
+7. **Cash count**: enter how many of each note/coin (5000 … 1). The total is the counted cash; the difference shows
+   Balanced / Short / Excess.
 
-```js
-window.APP_CONFIG = {
-  SUPABASE_URL: "https://abcdefgh.supabase.co",
-  SUPABASE_ANON_KEY: "eyJhbGciOi..."
-};
-```
+Excel (admin): the day sheet in the same layout and colours; the date-range report adds a **Sales by Rep** sheet.
 
-The anon key is meant to be public. Your data is protected because the database only lets signed-in users read or write.
-Never put the **service_role** key in this file.
-
-## Step 3: Deploy to Vercel
-
-**Option A: Drag and drop (no GitHub needed)**
-1. Install the Vercel CLI: `npm i -g vercel`
-2. In this folder run `vercel` and follow the prompts (Framework: **Other**, no build command, output directory `.`).
-3. Run `vercel --prod` to publish.
-
-**Option B: GitHub**
-1. Create a GitHub repository and upload all files from this folder.
-2. On https://vercel.com click **Add New → Project**, import the repository.
-3. Framework preset: **Other**. Leave Build Command empty. Click **Deploy**.
-
-Vercel gives you a link like `https://daily-sales-book.vercel.app`. Open it on any phone or computer and sign in.
-
-Tip: on a phone, use the browser's **Add to Home Screen** so it opens like an app.
-
-## Using it
-
-1. Pick the date (it opens on today) and the branch tab.
-2. **Sales**: type the bill number, put the amount under the payment type, press **Add sale**. If a customer pays part cash and part card, fill both columns on the same bill.
-3. **Other income / Other expenses**: description, amount, and whether it was cash or a bank.
-4. **End of day cash**: enter the opening float (or press *Use yesterday's count*), cash banked or handed over, then the counted cash. It shows **Balanced**, **Short** or **Excess**.
-5. **All branches** tab shows every branch side by side with totals.
-6. **Download Excel** at the bottom.
-7. **Rename** on the branch bar sets your real branch names.
-
-Changes made on one device appear on the others within a second or two.
-
-## Update 2: invoice items, serials, warranty, carry-forward
-
-**If you already ran `schema.sql` before this update:** open Supabase → SQL Editor → New query,
-paste `supabase/migration_002_items_warranty.sql`, and click **Run**. New installs only need `schema.sql`.
-Then upload the new `index.html`, `app.js` and `styles.css` to GitHub (Vercel redeploys by itself).
-
-How invoices work now:
-- One invoice has many items. Click **+ Add item** for each one.
-- Enter a **Serial / IMEI** for phones and laptops; quantity is then locked to 1. Leave it empty for accessories and type the quantity.
-- Pick a **Warranty** per item. The expiry date is worked out from the invoice date.
-- Under **Payment**, tap a payment name (for example *Sampath*) to put the remaining balance there.
-  The invoice saves only when payments equal the invoice total.
-- If a serial was already sold before, the app warns you and shows where. Press **Save invoice** again to save anyway.
-- **Serial & warranty lookup** finds an item by IMEI, invoice number or customer phone, across all branches,
-  and shows whether the warranty is active or expired.
-
-Today and tomorrow:
-- When a branch opens a new day, its **opening cash is set automatically** to the previous day's closing cash
-  (counted cash, or expected cash if nobody counted).
-- If yesterday's count is corrected later, today's page shows the difference; press **Use yesterday's closing** to update.
+Install: run `supabase/update_all_v8.sql` (safe to re-run), then replace `index.html`, `styles.css` and `app.js`.
 
 ## Changing payment types later
 
