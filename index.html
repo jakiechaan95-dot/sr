@@ -1,211 +1,151 @@
 <!doctype html>
 <html lang="en">
-
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#1b6a45">
-  <title>Daily Sales Book</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet"
-    href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="styles.css">
-  <style>
-    .stack {
-      display: flex;
-      flex-direction: column;
-      gap: 16px
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1b6a45">
+<title>Daily Sales Book</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+<style>.stack{display:flex;flex-direction:column;gap:16px}</style>
 </head>
-
 <body>
 
-  <!-- ===== Login ===== -->
-  <div class="app" id="loginView" hidden>
-    <form class="panel login" id="loginForm">
-      <h1>Daily Sales Book</h1>
-      <p>Sign in with the staff account your manager created for you.</p>
-      <label class="f">Email<input type="email" id="loginEmail" autocomplete="username" required></label>
-      <label class="f">Password<input type="password" id="loginPass" autocomplete="current-password" required></label>
-      <button class="primary" type="submit" id="loginBtn">Sign in</button>
-      <span class="err" id="loginErr"></span>
-    </form>
+<!-- ===== Login ===== -->
+<div class="app" id="loginView" hidden>
+  <form class="panel login" id="loginForm">
+    <h1>Daily Sales Book</h1>
+    <p>Sign in with the staff account your manager created for you.</p>
+    <label class="f">Email<input type="email" id="loginEmail" autocomplete="username" required></label>
+    <label class="f">Password<input type="password" id="loginPass" autocomplete="current-password" required></label>
+    <button class="primary" type="submit" id="loginBtn">Sign in</button>
+    <span class="err" id="loginErr"></span>
+  </form>
+</div>
+
+<!-- ===== App ===== -->
+<div class="app" id="app" hidden>
+  <header class="top">
+    <div class="brand"><h1>Daily Sales Book</h1><span class="status" id="status">Loading…</span></div>
+    <div class="datebar">
+      <button class="iconbtn" id="prevDay" aria-label="Previous day">‹</button>
+      <input type="date" id="date" aria-label="Report date">
+      <button class="iconbtn" id="nextDay" aria-label="Next day">›</button>
+      <button class="ghost" id="todayBtn">Today</button>
+    </div>
+    <div class="userbox"><span id="userEmail"></span><button class="ghost small" id="signOut">Sign out</button></div>
+    <nav class="branches" id="branchTabs" aria-label="Branch"></nav>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+  <div class="datewarn" id="dateWarn" hidden>
+    <span id="dateWarnText"></span>
+    <button type="button" class="primary small" id="dateWarnBtn">Go to today</button>
   </div>
 
-  <!-- ===== App ===== -->
-  <div class="app" id="app" hidden>
-    <header class="top">
-      <div class="brand">
-        <h1>Daily Sales Book</h1><span class="status" id="status">Loading…</span>
-      </div>
-      <div class="datebar">
-        <button class="iconbtn" id="prevDay" aria-label="Previous day">‹</button>
-        <input type="date" id="date" aria-label="Report date">
-        <button class="iconbtn" id="nextDay" aria-label="Next day">›</button>
-        <button class="ghost" id="todayBtn">Today</button>
-      </div>
-      <div class="userbox"><span id="userEmail"></span><button class="ghost small" id="signOut">Sign out</button></div>
-      <nav class="branches" id="branchTabs" aria-label="Branch"></nav>
-    </header>
+  <section class="panel" id="settingsPanel" hidden>
+    <div class="panel-head"><h2>Branch names</h2><span class="meta">Shown on tabs and in Excel files</span></div>
+    <form class="settings" id="settingsForm">
+      <label class="f">Branch 1<input id="bn_b1" maxlength="40"></label>
+      <label class="f">Branch 2<input id="bn_b2" maxlength="40"></label>
+      <label class="f">Branch 3<input id="bn_b3" maxlength="40"></label>
+      <div class="formfoot"><div class="actions"><button class="primary" type="submit">Save names</button><button class="ghost" type="button" id="settingsClose">Close</button></div></div>
+    </form>
+  </section>
 
-    <div class="banner" id="banner" hidden></div>
-    <div class="datewarn" id="dateWarn" hidden>
-      <span id="dateWarnText"></span>
-      <button type="button" class="primary small" id="dateWarnBtn">Go to today</button>
-    </div>
-
-    <section class="panel" id="settingsPanel" hidden>
-      <div class="panel-head">
-        <h2>Branch names</h2><span class="meta">Shown on tabs and in Excel files</span>
-      </div>
-      <form class="settings" id="settingsForm">
-        <label class="f">Branch 1<input id="bn_b1" maxlength="40"></label>
-        <label class="f">Branch 2<input id="bn_b2" maxlength="40"></label>
-        <label class="f">Branch 3<input id="bn_b3" maxlength="40"></label>
-        <div class="formfoot">
-          <div class="actions"><button class="primary" type="submit">Save names</button><button class="ghost"
-              type="button" id="settingsClose">Close</button></div>
-        </div>
-      </form>
-    </section>
-
-    <!-- single branch -->
-    <div id="branchView" class="stack">
-      <section class="kpis" id="kpis" aria-label="Day totals"></section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Sales</h2><span class="meta" id="salesMeta"></span>
-        </div>
-        <form class="entry" id="saleForm" autocomplete="off">
-          <div class="fields">
-            <label class="f">Bill / Invoice no.<input id="sRef" maxlength="40" placeholder="e.g. INV-1042"></label>
-            <label class="f">Customer name<input id="sDesc" maxlength="80" placeholder="Optional"></label>
-            <label class="f">Customer phone<input id="sPhone" type="tel" inputmode="tel" maxlength="20"
-                placeholder="Optional, helps warranty claims"></label>
-          </div>
-          <div class="items">
-            <div class="items-head">
-              <h3>Items</h3><span class="meta">Items with a serial / IMEI are always qty 1</span>
-            </div>
-            <div id="itemRows"></div>
-            <button type="button" class="ghost small" id="addItem">+ Add item</button>
-          </div>
-          <div class="paybox">
-            <div class="items-head">
-              <h3>Payment</h3><span class="meta">Tap a payment name to put the remaining balance there</span>
-            </div>
-            <div class="paygrid" id="payGrid"></div>
-          </div>
-          <div class="fields"><label class="f">Remarks<input id="sRemarks" maxlength="120"
-                placeholder="Optional"></label></div>
-          <div class="formfoot">
-            <div class="formtotal">Invoice<strong id="sItemsTotal">0.00</strong> · Paid<strong id="sTotal">0.00</strong>
-              <span id="sBal"></span><br><span class="err" id="sErr"></span></div>
-            <div class="actions"><button type="button" class="ghost" id="sCancel" hidden>Cancel edit</button><button
-                type="submit" class="primary" id="sSave">Save invoice</button></div>
-          </div>
-        </form>
-        <div class="tablewrap">
-          <table class="ledger cards" id="salesTable"></table>
-        </div>
-      </section>
-
-      <div class="split">
-        <section class="panel" id="incomePanel"></section>
-        <section class="panel" id="expensePanel"></section>
-      </div>
-
-      <section class="panel" id="cashPanel">
-        <div class="panel-head">
-          <h2>End of day cash</h2><span class="meta">Count the drawer and enter it below</span>
-        </div>
-        <div class="recon">
-          <div class="recon-inputs">
-            <div class="inline">
-              <label class="f">Opening cash (float)<input type="number" step="0.01" min="0" inputmode="decimal"
-                  id="opening" placeholder="0.00"></label>
-              <button type="button" class="ghost" id="prevCount"
-                title="Set opening cash to the previous day's closing cash">Use yesterday's closing</button>
-            </div>
-            <span class="msg" id="carryMsg"></span>
-            <label class="f">Cash banked / handed over<input type="number" step="0.01" min="0" inputmode="decimal"
-                id="banked" placeholder="0.00"></label>
-            <label class="f">Counted cash in drawer<input type="number" step="0.01" min="0" inputmode="decimal"
-                id="counted" placeholder="Enter after counting"></label>
-            <label class="f">Notes for the day<textarea id="notes" maxlength="500"
-                placeholder="Anything the office should know"></textarea></label>
-            <span class="msg" id="cashMsg"></span>
-          </div>
-          <div class="calc" id="calc"></div>
-        </div>
-        <h3>By payment type</h3>
-        <div class="tablewrap">
-          <table class="ledger" id="typeTable"></table>
-        </div>
-      </section>
-    </div>
-
-    <!-- all branches -->
-    <div id="allView" class="stack" hidden>
-      <section class="kpis" id="allKpis" aria-label="All branch totals"></section>
-      <section class="panel">
-        <div class="panel-head">
-          <h2>All branches summary</h2><span class="meta" id="allMeta"></span>
-        </div>
-        <div class="tablewrap">
-          <table class="ledger" id="allTable"></table>
-        </div>
-      </section>
-    </div>
-
-    <section class="panel" id="lookupPanel">
-      <div class="panel-head">
-        <h2>Serial &amp; warranty lookup</h2><span class="meta">Searches every branch and every date</span>
-      </div>
-      <form class="inline" id="lookupForm" autocomplete="off">
-        <label class="f">Serial / IMEI, invoice no. or customer phone<input id="lookupQ" maxlength="60"
-            placeholder="e.g. 356789104455667"></label>
-        <button class="primary" type="submit">Search</button>
-      </form>
-      <span class="msg" id="lookupMsg"></span>
-      <div class="tablewrap" id="lookupWrap" hidden>
-        <table class="ledger cards" id="lookupTable"></table>
-      </div>
-    </section>
+  <!-- single branch -->
+  <div id="branchView" class="stack">
+    <section class="kpis" id="kpis" aria-label="Day totals"></section>
 
     <section class="panel">
-      <div class="panel-head">
-        <h2>Download Excel</h2><span class="meta">Files open in Excel or Google Sheets</span>
+      <div class="panel-head"><h2>Sales</h2><span class="meta" id="salesMeta"></span></div>
+      <form class="entry" id="saleForm" autocomplete="off">
+        <div class="fields">
+          <label class="f">Bill / Invoice no.<input id="sRef" maxlength="40" placeholder="e.g. INV-1042"></label>
+          <label class="f">Customer name<input id="sDesc" maxlength="80" placeholder="Optional"></label>
+          <label class="f">Customer phone<input id="sPhone" type="tel" inputmode="tel" maxlength="20" placeholder="Optional, helps warranty claims"></label>
+        </div>
+        <div class="items">
+          <div class="items-head"><h3>Items</h3><span class="meta">Items with a serial / IMEI are always qty 1</span></div>
+          <div id="itemRows"></div>
+          <button type="button" class="ghost small" id="addItem">+ Add item</button>
+        </div>
+        <div class="paybox">
+          <div class="items-head"><h3>Payment</h3><span class="meta">Tap a payment name to put the remaining balance there</span></div>
+          <div class="paygrid" id="payGrid"></div>
+        </div>
+        <div class="fields"><label class="f">Remarks<input id="sRemarks" maxlength="120" placeholder="Optional"></label></div>
+        <div class="formfoot">
+          <div class="formtotal">Invoice<strong id="sItemsTotal">0.00</strong> · Paid<strong id="sTotal">0.00</strong> <span id="sBal"></span><br><span class="err" id="sErr"></span></div>
+          <div class="actions"><button type="button" class="ghost" id="sCancel" hidden>Cancel edit</button><button type="submit" class="primary" id="sSave">Save invoice</button></div>
+        </div>
+      </form>
+      <div class="tablewrap"><table class="ledger cards" id="salesTable"></table></div>
+    </section>
+
+    <div class="split">
+      <section class="panel" id="incomePanel"></section>
+      <section class="panel" id="expensePanel"></section>
+    </div>
+
+    <section class="panel" id="cashPanel">
+      <div class="panel-head"><h2>End of day cash</h2><span class="meta">Count the drawer and enter it below</span></div>
+      <div class="recon">
+        <div class="recon-inputs">
+          <div class="inline">
+            <label class="f">Opening cash (float)<input type="number" step="0.01" min="0" inputmode="decimal" id="opening" placeholder="0.00"></label>
+            <button type="button" class="ghost" id="prevCount" title="Set opening cash to the previous day's closing cash">Use yesterday's closing</button>
+          </div>
+          <span class="msg" id="carryMsg"></span>
+          <label class="f">Cash banked / handed over<input type="number" step="0.01" min="0" inputmode="decimal" id="banked" placeholder="0.00"></label>
+          <label class="f">Counted cash in drawer<input type="number" step="0.01" min="0" inputmode="decimal" id="counted" placeholder="Enter after counting"></label>
+          <label class="f">Notes for the day<textarea id="notes" maxlength="500" placeholder="Anything the office should know"></textarea></label>
+          <span class="msg" id="cashMsg"></span>
+        </div>
+        <div class="calc" id="calc"></div>
       </div>
-      <div class="exportgrid">
-        <div class="exportcard">
-          <h3 id="exOneTitle">This branch, this day</h3>
-          <p>Sales sheet with every payment column, other income, expenses and the cash summary.</p><button
-            class="ghost" id="exOne">Download day report</button>
-        </div>
-        <div class="exportcard">
-          <h3>All branches, this day</h3>
-          <p>A combined summary sheet plus one sheet per branch.</p><button class="ghost" id="exAll">Download all
-            branches</button>
-        </div>
-        <div class="exportcard">
-          <h3>Date range</h3>
-          <div class="fields"><label class="f">From<input type="date" id="exFrom"></label><label class="f">To<input
-                type="date" id="exTo"></label></div>
-          <button class="ghost" id="exRange">Download range report</button>
-        </div>
-      </div>
-      <span class="msg" id="exMsg"></span>
+      <h3>By payment type</h3>
+      <div class="tablewrap"><table class="ledger" id="typeTable"></table></div>
     </section>
   </div>
 
-  <script src="config.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="app.js"></script>
-</body>
+  <!-- all branches -->
+  <div id="allView" class="stack" hidden>
+    <section class="kpis" id="allKpis" aria-label="All branch totals"></section>
+    <section class="panel">
+      <div class="panel-head"><h2>All branches summary</h2><span class="meta" id="allMeta"></span></div>
+      <div class="tablewrap"><table class="ledger" id="allTable"></table></div>
+    </section>
+  </div>
 
+  <section class="panel" id="lookupPanel">
+    <div class="panel-head"><h2>Serial &amp; warranty lookup</h2><span class="meta">Searches every branch and every date</span></div>
+    <form class="inline" id="lookupForm" autocomplete="off">
+      <label class="f">Serial / IMEI, invoice no. or customer phone<input id="lookupQ" maxlength="60" placeholder="e.g. 356789104455667"></label>
+      <button class="primary" type="submit">Search</button>
+    </form>
+    <span class="msg" id="lookupMsg"></span>
+    <div class="tablewrap" id="lookupWrap" hidden><table class="ledger cards" id="lookupTable"></table></div>
+  </section>
+
+  <section class="panel" id="exportPanel">
+    <div class="panel-head"><h2>Download Excel</h2><span class="meta">Files open in Excel or Google Sheets</span></div>
+    <div class="exportgrid">
+      <div class="exportcard"><h3 id="exOneTitle">This branch, this day</h3><p>Sales sheet with every payment column, other income, expenses and the cash summary.</p><button class="ghost" id="exOne">Download day report</button></div>
+      <div class="exportcard"><h3>All branches, this day</h3><p>A combined summary sheet plus one sheet per branch.</p><button class="ghost" id="exAll">Download all branches</button></div>
+      <div class="exportcard"><h3>Date range</h3>
+        <div class="fields"><label class="f">From<input type="date" id="exFrom"></label><label class="f">To<input type="date" id="exTo"></label></div>
+        <button class="ghost" id="exRange">Download range report</button></div>
+    </div>
+    <span class="msg" id="exMsg"></span>
+  </section>
+</div>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="app.js"></script>
+</body>
 </html>
