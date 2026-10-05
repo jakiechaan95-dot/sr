@@ -61,6 +61,41 @@ function emptyDay(branch, date) { return { branch, date, opening: 0, banked: 0, 
 function isAdmin() { return !!(S.me && S.me.role === "admin"); }
 function canEdit() { return isAdmin() || S.date === todayISO(); }
 
+/* ================= amount working (140+120-20) ================= */
+// Accepts numbers joined with + or − (commas and spaces ignored). Returns null if not valid.
+function evalAmt(str) {
+  const t = String(str || "").replace(/[,\s]/g, "").replace(/[−–]/g, "-");
+  if (!t) return { ok: true, value: 0, expr: "" };
+  if (!/^[+-]?\d+(\.\d+)?([+-]\d+(\.\d+)?)*$/.test(t) && !/^[+-]?\.\d+/.test(t)) return { ok: false };
+  const parts = t.match(/[+-]?(\d+(\.\d+)?|\.\d+)/g) || [];
+  const value = r2(parts.reduce((a, p) => a + parseFloat(p), 0));
+  return { ok: true, value, expr: /\d[+-]/.test(t) ? t : "" };
+}
+const prettyExpr = e => String(e || "").replace(/([+-])/g, " $1 ").replace(/^ [+] /, "").replace(/-/g, "−").trim();
+// An amount box with + and − buttons and a live "= total" under it.
+function calcBox(cls, id, ph) {
+  return `<span class="calcbox"><input type="text" inputmode="decimal" class="calc-in ${cls}" ${id ? `id="${id}"` : ""} placeholder="${ph || "0.00"}" autocomplete="off">` +
+    `<button type="button" class="opbtn" data-op="+" aria-label="Add another amount" title="Add">+</button>` +
+    `<button type="button" class="opbtn" data-op="-" aria-label="Subtract an amount" title="Subtract">−</button></span><span class="calcres"></span>`;
+}
+function showCalc(inp) {
+  const res = inp.closest("label, .f").querySelector(".calcres"); if (!res) return;
+  const r = evalAmt(inp.value);
+  res.textContent = !r.ok ? "Use numbers with + or − only" : r.expr ? "= " + fmt(r.value) : "";
+  res.classList.toggle("bad", !r.ok);
+}
+// + / − buttons append the sign and keep the cursor in the box (works on phone keypads without + or −).
+document.addEventListener("click", e => {
+  const b = e.target.closest(".opbtn"); if (!b) return;
+  e.preventDefault();
+  const inp = b.parentElement.querySelector(".calc-in"); if (inp.disabled) return;
+  const v = inp.value.trim().replace(/[+\-−]$/, "");
+  inp.value = (v || "") + (v ? b.dataset.op : (b.dataset.op === "-" ? "-" : ""));
+  inp.focus(); try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+  inp.dispatchEvent(new Event("input", { bubbles: true }));
+});
+document.addEventListener("input", e => { if (e.target.classList && e.target.classList.contains("calc-in")) showCalc(e.target); });
+
 /* ================= calculations ================= */
 // Lines of a day, split into phones and accessories (each line has its own payments).
 function linesOf(d) {
@@ -108,7 +143,7 @@ function buildDays(days, sales, inc, exp, items) {
   });
   (items || []).slice().sort((a, b) => a.line_no - b.line_no).forEach(r => {
     const s = byId[r.sale_id]; if (!s) return;
-    s.items.push({ category: r.category === "phone" ? "phone" : "accessory", item: r.item, serial: r.serial || "", qty: num(r.qty) || 1,
+    s.items.push({ id: r.id, category: r.category === "phone" ? "phone" : "accessory", item: r.item, serial: r.serial || "", qty: num(r.qty) || 1,
       sales_rep: r.sales_rep || "", remarks: r.remarks || "", highlight: r.highlight || "", warranty_days: r.warranty_days || 0, warranty_until: r.warranty_until,
       pay: Object.fromEntries(PAY.map(p => [p.k, num(r[p.k])])) });
   });
@@ -118,8 +153,8 @@ function buildDays(days, sales, inc, exp, items) {
     const linesTotal = s.items.reduce((a, it) => a + payTotal(it.pay), 0);
     if (linesTotal < 0.005 && payTotal(s.pay) > 0) s.items[0].pay = { ...s.pay };
   });
-  (inc || []).forEach(r => { get(r.branch_id, r.date).income[r.id] = { id: r.id, t: Date.parse(r.created_at), desc: r.description, amount: num(r.amount), method: r.method, details: Array.isArray(r.details) ? r.details : [] }; });
-  (exp || []).forEach(r => { get(r.branch_id, r.date).expense[r.id] = { id: r.id, t: Date.parse(r.created_at), desc: r.description, amount: num(r.amount), method: r.method, details: Array.isArray(r.details) ? r.details : [] }; });
+  (inc || []).forEach(r => { get(r.branch_id, r.date).income[r.id] = { id: r.id, t: Date.parse(r.created_at), desc: r.description, amount: num(r.amount), calc: r.amount_calc || "", method: r.method, details: Array.isArray(r.details) ? r.details : [] }; });
+  (exp || []).forEach(r => { get(r.branch_id, r.date).expense[r.id] = { id: r.id, t: Date.parse(r.created_at), desc: r.description, amount: num(r.amount), calc: r.amount_calc || "", method: r.method, details: Array.isArray(r.details) ? r.details : [] }; });
   return o;
 }
 function check(res) { if (res.error) throw res.error; return res.data; }
@@ -237,7 +272,7 @@ function simplePanel(kind, title, verb, ph) {
     ${chips}
     <div class="fields">
       <label class="f">Description<input id="${kind}Desc" maxlength="80" placeholder="${ph}"></label>
-      <label class="f">Amount<input type="number" step="0.01" min="0" inputmode="decimal" id="${kind}Amt" placeholder="0.00"></label>
+      <label class="f">Amount${calcBox("", kind + "Amt", "e.g. 140+120")}</label>
       <label class="f">${verb}<select id="${kind}Method">${PAY.map(p => `<option value="${p.k}">${p.n}</option>`).join("")}</select></label>
     </div>
     ${brk}
@@ -322,7 +357,13 @@ function renderBranch() {
         `<td data-label="Sales rep" class="rep ${it.sales_rep || it.highlight ? "" : "z"}">${esc(it.sales_rep)}${it.highlight ? `<span class="hltag">${hlName(it.highlight)}</span>` : ""}</td>` +
         payCells(it.pay) +
         `<td data-label="Remarks" class="small full ${rem ? "" : "z"}">${rem}</td>` +
-        `<td class="act">${can ? `<button class="linkbtn" data-act="edit">Edit bill</button><button class="linkbtn del" data-act="del">Delete bill</button>` : ""}</td></tr>`;
+        `<td class="act">${can ? `<button class="linkbtn" data-act="hl" data-line="${it.id || ""}" aria-expanded="${S.hlOpen === it.id}">Colour</button><button class="linkbtn" data-act="edit">Edit bill</button><button class="linkbtn del" data-act="del">Delete bill</button>` : ""}</td></tr>`;
+      if (can && it.id && S.hlOpen === it.id) {
+        h += `<tr class="hlpick"><td colspan="${PAY.length + (cat === "phone" ? 7 : 6)}"><span>Highlight this line:</span>
+          <button type="button" class="sw sw-none" data-sethl="" data-line="${it.id}" aria-checked="${!it.highlight}">None</button>
+          ${HIGHLIGHTS.map(x => `<button type="button" class="sw sw-${x.k}" data-sethl="${x.k}" data-line="${it.id}" aria-checked="${it.highlight === x.k}" aria-label="${x.n}" title="${x.n}"></button>`).join("")}
+          <button type="button" class="linkbtn" data-sethl="close">Close</button></td></tr>`;
+      }
     });
     h += "</tbody>";
     if (list.length) h += `<tfoot><tr class="subtotal"><td class="title" colspan="${cat === "phone" ? 5 : 4}">Total ${label}</td>${PAY.map(p => `<td class="n" data-label="${p.n}">${fmtz(by[p.k])}</td>`).join("")}<td class="n total" data-label="Total"><strong>${fmt(tot)}</strong></td><td class="z"></td></tr></tfoot>`;
@@ -377,7 +418,8 @@ function renderIncome(c, can) {
 // Breakdown shown under the description: one small line per part.
 function brkText(r) {
   const d = r.details || [];
-  return d.length ? `<span class="brklist">${d.map(x => `<span>${esc(x.name)}<b>${fmt(num(x.amount))}</b></span>`).join("")}</span>` : "";
+  if (d.length) return `<span class="brklist">${d.map(x => `<span>${esc(x.name)}<b>${x.calc ? `<i>${esc(prettyExpr(x.calc))} =</i> ` : ""}${fmt(num(x.amount))}</b></span>`).join("")}</span>`;
+  return r.calc ? `<span class="brklist"><span><i>${esc(prettyExpr(r.calc))}</i></span></span>` : "";
 }
 function renderExpenses(c, can) {
   $("expenseMeta").textContent = fmt(c.lessExp);
@@ -563,22 +605,38 @@ function editBill(bill) {
   $("sCancel").hidden = false; updBillTotal();
   $("billPanel").scrollIntoView({ block: "start", behavior: "smooth" });
 }
-["phonesTable", "accTable"].forEach(id => $(id).addEventListener("click", e => tableAction(e, "sales", editBill, resetSale)));
+["phonesTable", "accTable"].forEach(id => $(id).addEventListener("click", e => {
+  // open / close the colour picker for one line
+  const hlBtn = e.target.closest('[data-act="hl"]');
+  if (hlBtn) { if (!canEdit()) return; S.hlOpen = S.hlOpen === hlBtn.dataset.line ? null : hlBtn.dataset.line; render(); return; }
+  // pick a colour: saved straight away, no need to edit the bill
+  const pick = e.target.closest("[data-sethl]");
+  if (pick) {
+    if (pick.dataset.sethl === "close" || !canEdit()) { S.hlOpen = null; render(); return; }
+    const lineId = pick.dataset.line, colour = pick.dataset.sethl;
+    S.hlOpen = null;
+    write(async () => check(await sb.from("sale_items").update({ highlight: colour }).eq("id", lineId))).catch(() => {});
+    return;
+  }
+  tableAction(e, "sales", editBill, resetSale);
+}));
 
 /* ---- income & expenses ---- */
 function brkRow(kind, x) {
   const r = document.createElement("div"); r.className = "brkrow";
   r.innerHTML = `<label class="f">Name / detail<input class="b-name" maxlength="40" placeholder="${kind === "expense" ? "e.g. Sharoze" : "e.g. Mosque"}"></label>
-    <label class="f">Amount<input class="b-amt" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0.00"></label>
+    <label class="f">Amount${calcBox("b-amt", "", "e.g. 20+40")}</label>
     <button type="button" class="iconbtn b-del" aria-label="Remove breakdown line" title="Remove this line">×</button>`;
-  r.querySelector(".b-name").value = (x && x.name) || ""; r.querySelector(".b-amt").value = x && num(x.amount) ? num(x.amount) : "";
-  $(kind + "Brk").appendChild(r); return r;
+  r.querySelector(".b-name").value = (x && x.name) || "";
+  r.querySelector(".b-amt").value = x ? (x.calc || (num(x.amount) ? num(x.amount) : "")) : "";
+  $(kind + "Brk").appendChild(r); showCalc(r.querySelector(".b-amt")); return r;
 }
 function readBrk(kind) {
   const out = [];
   $(kind + "Brk").querySelectorAll(".brkrow").forEach(r => {
-    const name = r.querySelector(".b-name").value.trim(), amount = r2(num(r.querySelector(".b-amt").value));
-    if (name || amount) out.push({ name: name || "-", amount });
+    const name = r.querySelector(".b-name").value.trim(), ev = evalAmt(r.querySelector(".b-amt").value);
+    if (!ev.ok) { out.bad = true; return; }
+    if (name || ev.value) out.push(ev.expr ? { name: name || "-", amount: ev.value, calc: ev.expr } : { name: name || "-", amount: ev.value });
   });
   return out;
 }
@@ -586,11 +644,13 @@ function readBrk(kind) {
 function syncBrk(kind) {
   const b = readBrk(kind), amt = $(kind + "Amt"), has = $(kind + "Brk").children.length > 0;
   if (has) { const t = r2(b.reduce((a, x) => a + x.amount, 0)); amt.value = t ? t : ""; amt.disabled = true; } else amt.disabled = false;
+  showCalc(amt);
 }
 ["income", "expense"].forEach(kind => {
   $(kind + "AddBrk").onclick = () => {
     // turning a single amount into a breakdown keeps that amount as the first line
-    if (!$(kind + "Brk").children.length && num($(kind + "Amt").value) > 0) brkRow(kind, { name: $(kind + "Desc").value.trim() || "Part 1", amount: num($(kind + "Amt").value) });
+    const cur = evalAmt($(kind + "Amt").value);
+    if (!$(kind + "Brk").children.length && cur.ok && cur.value > 0) brkRow(kind, { name: $(kind + "Desc").value.trim() || "Part 1", amount: cur.value, calc: cur.expr });
     brkRow(kind).querySelector(".b-name").focus(); syncBrk(kind);
   };
   $(kind + "Brk").addEventListener("click", e => { const d = e.target.closest(".b-del"); if (d) { d.closest(".brkrow").remove(); syncBrk(kind); } });
@@ -599,7 +659,7 @@ function syncBrk(kind) {
 
 ["income", "expense"].forEach(kind => {
   const reset = () => {
-    $(kind + "Desc").value = ""; $(kind + "Amt").value = ""; $(kind + "Amt").disabled = false; $(kind + "Method").value = "cash";
+    $(kind + "Desc").value = ""; $(kind + "Amt").value = ""; $(kind + "Amt").disabled = false; showCalc($(kind + "Amt")); $(kind + "Method").value = "cash";
     $(kind + "Brk").innerHTML = "";
     S.edit[kind] = null; $(kind + "Save").textContent = "Add"; $(kind + "Cancel").hidden = true; $(kind + "Err").textContent = "";
   };
@@ -613,11 +673,15 @@ function syncBrk(kind) {
     e.preventDefault();
     if (!canEdit()) return;
     const details = readBrk(kind);
-    const amount = details.length ? r2(details.reduce((a, x) => a + x.amount, 0)) : r2(num($(kind + "Amt").value));
+    if (details.bad) { $(kind + "Err").textContent = "A breakdown amount is not valid. Use numbers with + or − only."; return; }
+    const main = evalAmt($(kind + "Amt").value);
+    if (!details.length && !main.ok) { $(kind + "Err").textContent = "The amount is not valid. Use numbers with + or − only, e.g. 140+120."; return; }
+    const amount = details.length ? r2(details.reduce((a, x) => a + x.amount, 0)) : main.value;
     if (!$(kind + "Desc").value.trim()) { $(kind + "Err").textContent = "Enter a description."; return; }
     if (amount <= 0) { $(kind + "Err").textContent = "Enter an amount above zero."; return; }
     const body = { branch_id: S.branch, date: S.date, description: $(kind + "Desc").value.trim(), amount, method: $(kind + "Method").value };
-    body.details = details;
+    body.details = details.map(x => ({ ...x }));
+    body.amount_calc = details.length ? "" : (main.expr || "");
     const editId = S.edit[kind];
     $(kind + "Save").disabled = true;
     try {
@@ -627,7 +691,7 @@ function syncBrk(kind) {
   });
   $(kind + "Cancel").onclick = () => { reset(); render(); };
   $(kind + "Table").addEventListener("click", e => tableAction(e, kind, r => {
-    $(kind + "Desc").value = r.desc || ""; $(kind + "Amt").value = num(r.amount) || ""; $(kind + "Method").value = r.method || "cash";
+    $(kind + "Desc").value = r.desc || ""; $(kind + "Amt").value = r.calc || num(r.amount) || ""; showCalc($(kind + "Amt")); $(kind + "Method").value = r.method || "cash";
     $(kind + "Brk").innerHTML = ""; (r.details || []).forEach(x => brkRow(kind, x)); syncBrk(kind);
     S.edit[kind] = r.id; $(kind + "Save").textContent = "Update"; $(kind + "Cancel").hidden = false;
     $(kind + "Form").scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -700,7 +764,7 @@ $("lookupForm").addEventListener("submit", async e => {
 function setDate(d) {
   if (!d) return;
   if (S.me && !isAdmin()) d = todayISO();
-  S.date = d; S.days = {}; resetSale(); S.edit.income = S.edit.expense = null; $("cashMsg").textContent = "";
+  S.date = d; S.days = {}; S.hlOpen = null; resetSale(); S.edit.income = S.edit.expense = null; $("cashMsg").textContent = "";
   render(); subscribeLive(); refresh();
 }
 $("date").addEventListener("change", e => setDate(e.target.value));
@@ -814,7 +878,8 @@ function daySheetRows(branchId, date, d) {
   const small = (rowsList, label, total) => {
     section(label);
     push([{ v: "No", s: st.head }, { v: "", s: st.head }, { v: "", s: st.head }, { v: "DESCRIPTION", s: st.head }, { v: label === "INCOME" ? "RECEIVED BY" : "PAID BY", s: st.head }, { v: "AMOUNT", s: st.head }]);
-    rowsList.forEach((x, i) => push([{ v: i + 1, int: true, s: st.cell }, { v: "", s: st.cell }, { v: "", s: st.cell }, { v: x.desc.toUpperCase(), s: st.cell }, { v: payName(x.method), s: st.cell }, N(x.amount)]));
+    rowsList.forEach((x, i) => push([{ v: i + 1, int: true, s: st.cell }, { v: "", s: st.cell }, { v: "", s: st.cell }, { v: x.desc.toUpperCase(), s: st.cell }, { v: payName(x.method), s: st.cell }, N(x.amount),
+      x.calc ? { v: prettyExpr(x.calc), s: { font: { italic: true, color: { rgb: "666666" } } } } : ""]));
     push([{ v: "", s: st.totL }, { v: "", s: st.totL }, { v: "", s: st.totL }, { v: "TOTAL " + label, s: st.totL }, { v: "", s: st.totL }, N(total, st.tot)]);
     push([]);
   };
@@ -825,7 +890,7 @@ function daySheetRows(branchId, date, d) {
   // income & expense breakdowns (e.g. breakfast & lunch per person, charity 50 + 50)
   [...c.inc, ...c.exp].filter(x => (x.details || []).length).forEach(x => {
     push([{ v: "", s: {} }, { v: "", s: {} }, { v: "", s: {} }, { v: x.desc.toUpperCase(), s: st.head }, { v: "AMOUNT", s: st.head }]);
-    x.details.forEach(dt => push(["", "", "", { v: String(dt.name).toUpperCase(), s: st.cell }, N(num(dt.amount))]));
+    x.details.forEach(dt => push(["", "", "", { v: String(dt.name).toUpperCase(), s: st.cell }, N(num(dt.amount)), dt.calc ? { v: prettyExpr(dt.calc), s: { font: { italic: true, color: { rgb: "666666" } } } } : ""]));
     push(["", "", "", { v: "TOTAL", s: st.totL }, N(x.amount, st.tot)]);
     push([]);
   });
@@ -918,8 +983,8 @@ $("exRange").onclick = async () => {
       if (it.highlight) { const h = o.hl[it.highlight] || (o.hl[it.highlight] = { n: 0, amt: 0 }); h.n += it.category === "phone" ? 1 : it.qty; h.amt += payTotal(it.pay); }
     });
     inc.push([d.date, bn, "Yesterday cash", "Cash", N(c.opening, {})]);
-    c.inc.forEach(r => inc.push([d.date, bn, r.desc || "", payName(r.method), N(r.amount, {}), (r.details || []).map(x => x.name + " " + fmt(num(x.amount))).join(", ")]));
-    c.exp.forEach(r => exp.push([d.date, bn, r.desc || "", payName(r.method), N(r.amount, {}), (r.details || []).map(x => x.name + " " + fmt(num(x.amount))).join(", ")]));
+    c.inc.forEach(r => inc.push([d.date, bn, r.desc || "", payName(r.method), N(r.amount, {}), (r.details || []).map(x => x.name + " " + (x.calc ? prettyExpr(x.calc) + " = " : "") + fmt(num(x.amount))).join(", ")]));
+    c.exp.forEach(r => exp.push([d.date, bn, r.desc || "", payName(r.method), N(r.amount, {}), (r.details || []).map(x => x.name + " " + (x.calc ? prettyExpr(x.calc) + " = " : "") + fmt(num(x.amount))).join(", ")]));
   });
   // highlighted (commission) items per colour, with the colour as the heading fill
   const repRows = [[...H(["Sales rep", "Branch", "Phones sold", "Phones amount", "Accessories sold", "Accessories amount", "Total amount"]),
