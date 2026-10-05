@@ -19,6 +19,13 @@ const WARRANTY = [
   { d: 90, n: "3 months" }, { d: 180, n: "6 months" }, { d: 365, n: "1 year" }, { d: 730, n: "2 years" }
 ];
 const NOTES = [5000, 2000, 1000, 500, 100, 50, 20, 10, 5, 2, 1];
+// Highlight colours for lines (e.g. commission items). xl = Excel fill colour.
+const HIGHLIGHTS = [
+  { k: "green", n: "Green", xl: "92D050" }, { k: "yellow", n: "Yellow", xl: "FFFF00" }, { k: "blue", n: "Blue", xl: "5BB3EA" },
+  { k: "pink", n: "Pink", xl: "F4B6C2" }, { k: "orange", n: "Orange", xl: "F8B26A" }, { k: "purple", n: "Purple", xl: "C9A3E6" }
+];
+const hlName = k => (HIGHLIGHTS.find(h => h.k === k) || {}).n || "";
+const hlXl = k => (HIGHLIGHTS.find(h => h.k === k) || {}).xl || "";
 const EXPENSE_CHIPS = ["Transfer - Amana", "Transfer - Seylan", "Transfer - Sampath", "Boss", "Breakfast & lunch", "PickMe", "Transport", "Delivery", "Salary", "Shop bike fuel"];
 const XL_COLORS = { cash: "000000", sampath: "E46C1E", amana: "1F9488", seylan: "D42A2A", commercial: "6A3D9E", amex: "1D2F6B", web: "0A6C8F" };
 
@@ -102,7 +109,7 @@ function buildDays(days, sales, inc, exp, items) {
   (items || []).slice().sort((a, b) => a.line_no - b.line_no).forEach(r => {
     const s = byId[r.sale_id]; if (!s) return;
     s.items.push({ category: r.category === "phone" ? "phone" : "accessory", item: r.item, serial: r.serial || "", qty: num(r.qty) || 1,
-      sales_rep: r.sales_rep || "", remarks: r.remarks || "", warranty_days: r.warranty_days || 0, warranty_until: r.warranty_until,
+      sales_rep: r.sales_rep || "", remarks: r.remarks || "", highlight: r.highlight || "", warranty_days: r.warranty_days || 0, warranty_until: r.warranty_until,
       pay: Object.fromEntries(PAY.map(p => [p.k, num(r[p.k])])) });
   });
   // Bills saved before line payments existed: show the bill's payment on its first line.
@@ -111,7 +118,7 @@ function buildDays(days, sales, inc, exp, items) {
     const linesTotal = s.items.reduce((a, it) => a + payTotal(it.pay), 0);
     if (linesTotal < 0.005 && payTotal(s.pay) > 0) s.items[0].pay = { ...s.pay };
   });
-  (inc || []).forEach(r => { get(r.branch_id, r.date).income[r.id] = { id: r.id, t: Date.parse(r.created_at), desc: r.description, amount: num(r.amount), method: r.method }; });
+  (inc || []).forEach(r => { get(r.branch_id, r.date).income[r.id] = { id: r.id, t: Date.parse(r.created_at), desc: r.description, amount: num(r.amount), method: r.method, details: Array.isArray(r.details) ? r.details : [] }; });
   (exp || []).forEach(r => { get(r.branch_id, r.date).expense[r.id] = { id: r.id, t: Date.parse(r.created_at), desc: r.description, amount: num(r.amount), method: r.method, details: Array.isArray(r.details) ? r.details : [] }; });
   return o;
 }
@@ -223,9 +230,8 @@ function rememberReps(extra) {
 
 /* ================= static UI ================= */
 function simplePanel(kind, title, verb, ph) {
-  const chips = kind === "expense" ? `<div class="chips" id="expenseChips">${EXPENSE_CHIPS.map(c => `<button type="button" class="chip" data-chip="${esc(c)}">${esc(c)}</button>`).join("")}</div>`
-                                   : `<div class="chips" id="incomeChips"></div>`;
-  const brk = kind === "expense" ? `<div class="brk" id="brkRows"></div><button type="button" class="ghost small" id="addBrk">+ Breakdown line (e.g. lunch per person)</button>` : "";
+  const chips = kind === "expense" ? `<div class="chips" id="expenseChips">${EXPENSE_CHIPS.map(c => `<button type="button" class="chip" data-chip="${esc(c)}">${esc(c)}</button>`).join("")}</div>` : "";
+  const brk = `<div class="brk" id="${kind}Brk"></div><button type="button" class="ghost small" id="${kind}AddBrk">+ Breakdown line ${kind === "expense" ? "(e.g. lunch per person)" : "(e.g. charity 50 + 50)"}</button>`;
   return `<div class="panel-head"><h2>${title}</h2><span class="meta" id="${kind}Meta"></span></div>
   <form class="entry" id="${kind}Form" autocomplete="off">
     ${chips}
@@ -239,7 +245,7 @@ function simplePanel(kind, title, verb, ph) {
   </form>
   <div class="tablewrap"><table class="ledger cards sheet" id="${kind}Table"></table></div>`;
 }
-$("incomePanel").innerHTML = simplePanel("income", "Income", "Received by", "e.g. Cash at shop, Liberty cash");
+$("incomePanel").innerHTML = simplePanel("income", "Income", "Received by", "e.g. Charity, commission received");
 $("expensePanel").innerHTML = simplePanel("expense", "Expenses", "Paid by", "e.g. Transport, flowers");
 
 /* ================= render ================= */
@@ -308,12 +314,12 @@ function renderBranch() {
     if (!list.length) h += `<tr><td class="empty" colspan="${PAY.length + (cat === "phone" ? 7 : 6)}">No ${label} today.</td></tr>`;
     list.forEach(({ bill, it }, i) => {
       const rem = [bill.desc, bill.phone, it.warranty_days ? warName(it.warranty_days) + " warranty" : "", bill.remarks].filter(Boolean).map(esc).join(" · ");
-      h += `<tr data-id="${bill.id}" class="${S.edit.sale === bill.id ? "editing" : ""}">` +
+      h += `<tr data-id="${bill.id}" class="${S.edit.sale === bill.id ? "editing" : ""} ${it.highlight ? "hl hl-" + it.highlight : ""}">` +
         `<td class="dim z">${i + 1}</td>` +
         `<td data-label="Bill no.">${esc(bill.ref || "–")}</td>` +
         (cat === "phone" ? `<td data-label="IMEI"><span class="sn">${esc(it.serial)}</span></td>` : "") +
         `<td class="title">${it.qty > 1 ? fmt(it.qty).replace(/\.00$/, "") + " × " : ""}${esc(it.item)}</td>` +
-        `<td data-label="Sales rep" class="${it.sales_rep ? "" : "z"}">${esc(it.sales_rep)}</td>` +
+        `<td data-label="Sales rep" class="rep ${it.sales_rep || it.highlight ? "" : "z"}">${esc(it.sales_rep)}${it.highlight ? `<span class="hltag">${hlName(it.highlight)}</span>` : ""}</td>` +
         payCells(it.pay) +
         `<td data-label="Remarks" class="small full ${rem ? "" : "z"}">${rem}</td>` +
         `<td class="act">${can ? `<button class="linkbtn" data-act="edit">Edit bill</button><button class="linkbtn del" data-act="del">Delete bill</button>` : ""}</td></tr>`;
@@ -359,24 +365,26 @@ function renderBranch() {
 }
 
 function renderIncome(c, can) {
-  $("incomeChips").innerHTML = ["Cash at shop", "Liberty cash", ...(S.allBranches || []).filter(b => b.id !== S.branch).map(b => b.name + " cash")]
-    .map(n => `<button type="button" class="chip" data-chip="${esc(n)}">${esc(n)}</button>`).join("");
   $("incomeMeta").textContent = fmt(c.otherIncome);
   let h = `<thead><tr><th>#</th><th>Description</th><th>Received by</th><th class="n">Amount</th><th></th></tr></thead><tbody>`;
   h += `<tr><td class="dim z">1</td><td class="title">Yesterday cash <span class="sub">carried from previous day</span></td><td data-label="Received by"><span class="payname p-cash">Cash</span></td><td class="n" data-label="Amount"><strong>${fmt(c.opening)}</strong></td><td class="act"></td></tr>`;
   c.inc.forEach((r, i) => {
-    h += `<tr data-id="${r.id}" class="${S.edit.income === r.id ? "editing" : ""}"><td class="dim z">${i + 2}</td><td class="title">${esc(r.desc || "(no description)")}</td><td data-label="Received by"><span class="payname p-${esc(r.method)}">${esc(payName(r.method))}</span></td><td class="n" data-label="Amount"><strong>${fmt(r.amount)}</strong></td><td class="act">${can ? `<button class="linkbtn" data-act="edit">Edit</button><button class="linkbtn del" data-act="del">Delete</button>` : ""}</td></tr>`;
+    h += `<tr data-id="${r.id}" class="${S.edit.income === r.id ? "editing" : ""}"><td class="dim z">${i + 2}</td><td class="title">${esc(r.desc || "(no description)")}${brkText(r)}</td><td data-label="Received by"><span class="payname p-${esc(r.method)}">${esc(payName(r.method))}</span></td><td class="n" data-label="Amount"><strong>${fmt(r.amount)}</strong></td><td class="act">${can ? `<button class="linkbtn" data-act="edit">Edit</button><button class="linkbtn del" data-act="del">Delete</button>` : ""}</td></tr>`;
   });
   h += `</tbody><tfoot><tr class="subtotal"><td class="title" colspan="3">Total income</td><td class="n total" data-label="Total">${fmt(c.otherIncome)}</td><td class="z"></td></tr></tfoot>`;
   $("incomeTable").innerHTML = h;
+}
+// Breakdown shown under the description: one small line per part.
+function brkText(r) {
+  const d = r.details || [];
+  return d.length ? `<span class="brklist">${d.map(x => `<span>${esc(x.name)}<b>${fmt(num(x.amount))}</b></span>`).join("")}</span>` : "";
 }
 function renderExpenses(c, can) {
   $("expenseMeta").textContent = fmt(c.lessExp);
   let h = `<thead><tr><th>#</th><th>Description</th><th>Paid by</th><th class="n">Amount</th><th></th></tr></thead><tbody>`;
   if (!c.exp.length && !c.banked) h += `<tr><td class="empty" colspan="5">No expenses today. Bank transfers (cash taken to the bank) go here too.</td></tr>`;
   c.exp.forEach((r, i) => {
-    const brk = (r.details || []).length ? `<span class="sub">${r.details.map(x => esc(x.name) + " " + fmt(num(x.amount))).join(" · ")}</span>` : "";
-    h += `<tr data-id="${r.id}" class="${S.edit.expense === r.id ? "editing" : ""}"><td class="dim z">${i + 1}</td><td class="title">${esc(r.desc || "(no description)")}${brk}</td><td data-label="Paid by"><span class="payname p-${esc(r.method)}">${esc(payName(r.method))}</span></td><td class="n" data-label="Amount"><strong>${fmt(r.amount)}</strong></td><td class="act">${can ? `<button class="linkbtn" data-act="edit">Edit</button><button class="linkbtn del" data-act="del">Delete</button>` : ""}</td></tr>`;
+    h += `<tr data-id="${r.id}" class="${S.edit.expense === r.id ? "editing" : ""}"><td class="dim z">${i + 1}</td><td class="title">${esc(r.desc || "(no description)")}${brkText(r)}</td><td data-label="Paid by"><span class="payname p-${esc(r.method)}">${esc(payName(r.method))}</span></td><td class="n" data-label="Amount"><strong>${fmt(r.amount)}</strong></td><td class="act">${can ? `<button class="linkbtn" data-act="edit">Edit</button><button class="linkbtn del" data-act="del">Delete</button>` : ""}</td></tr>`;
   });
   if (c.banked) h += `<tr><td class="dim z"></td><td class="title">Cash banked (older entry)</td><td data-label="Paid by"><span class="payname p-cash">Cash</span></td><td class="n" data-label="Amount"><strong>${fmt(c.banked)}</strong></td><td class="act"></td></tr>`;
   h += "</tbody>";
@@ -428,7 +436,7 @@ function renderAll() {
 
 /* ================= bill form ================= */
 function addLine(cat, it) {
-  it = it || { category: cat, item: "", serial: "", qty: 1, sales_rep: "", warranty_days: 0, pay: zeroPay() };
+  it = it || { category: cat, item: "", serial: "", qty: 1, sales_rep: "", highlight: "", warranty_days: 0, pay: zeroPay() };
   const row = document.createElement("div");
   row.className = "itemrow"; row.dataset.cat = cat;
   const isPhone = cat === "phone";
@@ -440,6 +448,10 @@ function addLine(cat, it) {
       <label class="f">Qty<input class="i-qty" type="number" min="1" step="1" inputmode="numeric"></label>
       <label class="f">Sales rep<input class="i-rep" maxlength="40" list="repList" placeholder="Name" autocapitalize="characters"></label>
       <label class="f">Warranty<select class="i-war">${WARRANTY.map(w => `<option value="${w.d}">${w.n}</option>`).join("")}</select></label>
+      <div class="f it-hl"><span>Highlight (commission)</span><div class="swatches" role="radiogroup" aria-label="Highlight colour">
+        <button type="button" class="sw sw-none" data-hl="" role="radio" title="No highlight">None</button>
+        ${HIGHLIGHTS.map(h => `<button type="button" class="sw sw-${h.k}" data-hl="${h.k}" role="radio" title="${h.n}" aria-label="${h.n}"></button>`).join("")}
+      </div></div>
     </div>
     <div class="ir-pay">
       ${PAY.map(p => `<label class="f"><span class="payname p-${p.k}">${p.n}</span><input class="i-pay" data-k="${p.k}" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0.00"></label>`).join("")}
@@ -450,10 +462,15 @@ function addLine(cat, it) {
   row.querySelector(".i-qty").value = it.qty || 1;
   row.querySelector(".i-rep").value = it.sales_rep || "";
   row.querySelector(".i-war").value = String(it.warranty_days || 0);
+  setHl(row, it.highlight || "");
   row.querySelectorAll(".i-pay").forEach(inp => { const v = num(it.pay && it.pay[inp.dataset.k]); inp.value = v ? v : ""; });
   $("itemRows").appendChild(row);
   syncLine(row);
   return row;
+}
+function setHl(row, k) {
+  row.dataset.hl = k;
+  row.querySelectorAll(".sw").forEach(b => b.setAttribute("aria-checked", String(b.dataset.hl === k)));
 }
 function syncLine(row) {
   const q = row.querySelector(".i-qty");
@@ -477,7 +494,7 @@ function readLines() {
     if (!item) err = err || `${n} needs a description.`;
     if (cat === "phone" && !serial) err = err || `${n} is a phone: enter its IMEI.`;
     if (total <= 0) err = err || `${n} needs an amount under Cash, Sampath, Amana, Seylan, Commercial, Amex or Web.`;
-    out.push({ category: cat, item, serial, qty, sales_rep: rep, warranty_days: war, ...pay });
+    out.push({ category: cat, item, serial, qty, sales_rep: rep, highlight: row.dataset.hl || "", warranty_days: war, ...pay });
   });
   return { lines: out, err };
 }
@@ -487,16 +504,17 @@ function updBillTotal() {
 }
 function resetSale() {
   ["sRef", "sDesc", "sPhone", "sRemarks"].forEach(id => $(id).value = "");
-  $("itemRows").innerHTML = ""; addLine("phone");
+  $("itemRows").innerHTML = ""; // cashier picks + Phone or + Accessory
   S.edit.sale = null; S.dupOk = null; $("sSave").textContent = "Save bill"; $("billTitle").textContent = "New bill";
   $("sCancel").hidden = true; $("sErr").textContent = ""; updBillTotal();
 }
 $("addPhone").onclick = () => { addLine("phone").querySelector(".i-serial").focus(); };
 $("addAcc").onclick = () => { addLine("accessory").querySelector(".i-name").focus(); };
 $("itemRows").addEventListener("click", e => {
+  const sw = e.target.closest(".sw");
+  if (sw) { setHl(sw.closest(".itemrow"), sw.dataset.hl); return; }
   const del = e.target.closest(".i-del"); if (!del) return;
   del.closest(".itemrow").remove();
-  if (!$("itemRows").children.length) addLine("accessory");
   updBillTotal();
 });
 $("saleForm").addEventListener("input", e => {
@@ -515,7 +533,7 @@ $("saleForm").addEventListener("submit", async e => {
   const { lines, err } = readLines();
   $("sErr").textContent = "";
   if (err) { $("sErr").textContent = err; return; }
-  if (!lines.length) { $("sErr").textContent = "Add at least one phone or accessory line."; return; }
+  if (!lines.length) { $("sErr").textContent = "Choose + Phone or + Accessory and fill in the line first."; return; }
   const serials = lines.map(l => l.serial).filter(Boolean);
   if (new Set(serials).size !== serials.length) { $("sErr").textContent = "The same IMEI is entered twice on this bill."; return; }
   const editId = S.edit.sale, key = serials.join("|");
@@ -548,51 +566,58 @@ function editBill(bill) {
 ["phonesTable", "accTable"].forEach(id => $(id).addEventListener("click", e => tableAction(e, "sales", editBill, resetSale)));
 
 /* ---- income & expenses ---- */
-function brkRow(x) {
+function brkRow(kind, x) {
   const r = document.createElement("div"); r.className = "brkrow";
-  r.innerHTML = `<label class="f">Name<input class="b-name" maxlength="40" placeholder="e.g. Sharoze"></label>
+  r.innerHTML = `<label class="f">Name / detail<input class="b-name" maxlength="40" placeholder="${kind === "expense" ? "e.g. Sharoze" : "e.g. Mosque"}"></label>
     <label class="f">Amount<input class="b-amt" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0.00"></label>
-    <button type="button" class="iconbtn b-del" aria-label="Remove breakdown line">×</button>`;
+    <button type="button" class="iconbtn b-del" aria-label="Remove breakdown line" title="Remove this line">×</button>`;
   r.querySelector(".b-name").value = (x && x.name) || ""; r.querySelector(".b-amt").value = x && num(x.amount) ? num(x.amount) : "";
-  $("brkRows").appendChild(r); return r;
+  $(kind + "Brk").appendChild(r); return r;
 }
-function readBrk() {
+function readBrk(kind) {
   const out = [];
-  $("brkRows").querySelectorAll(".brkrow").forEach(r => {
+  $(kind + "Brk").querySelectorAll(".brkrow").forEach(r => {
     const name = r.querySelector(".b-name").value.trim(), amount = r2(num(r.querySelector(".b-amt").value));
     if (name || amount) out.push({ name: name || "-", amount });
   });
   return out;
 }
-function syncBrk() {
-  const b = readBrk(); const amt = $("expenseAmt");
-  if (b.length) { amt.value = r2(b.reduce((a, x) => a + x.amount, 0)) || ""; amt.disabled = true; } else amt.disabled = false;
+// With breakdown lines, the amount is their total (and can't be typed).
+function syncBrk(kind) {
+  const b = readBrk(kind), amt = $(kind + "Amt"), has = $(kind + "Brk").children.length > 0;
+  if (has) { const t = r2(b.reduce((a, x) => a + x.amount, 0)); amt.value = t ? t : ""; amt.disabled = true; } else amt.disabled = false;
 }
-$("addBrk").onclick = () => { brkRow().querySelector(".b-name").focus(); syncBrk(); };
-$("brkRows").addEventListener("click", e => { const d = e.target.closest(".b-del"); if (d) { d.closest(".brkrow").remove(); syncBrk(); } });
-$("brkRows").addEventListener("input", syncBrk);
+["income", "expense"].forEach(kind => {
+  $(kind + "AddBrk").onclick = () => {
+    // turning a single amount into a breakdown keeps that amount as the first line
+    if (!$(kind + "Brk").children.length && num($(kind + "Amt").value) > 0) brkRow(kind, { name: $(kind + "Desc").value.trim() || "Part 1", amount: num($(kind + "Amt").value) });
+    brkRow(kind).querySelector(".b-name").focus(); syncBrk(kind);
+  };
+  $(kind + "Brk").addEventListener("click", e => { const d = e.target.closest(".b-del"); if (d) { d.closest(".brkrow").remove(); syncBrk(kind); } });
+  $(kind + "Brk").addEventListener("input", () => syncBrk(kind));
+});
 
 ["income", "expense"].forEach(kind => {
   const reset = () => {
     $(kind + "Desc").value = ""; $(kind + "Amt").value = ""; $(kind + "Amt").disabled = false; $(kind + "Method").value = "cash";
-    if (kind === "expense") $("brkRows").innerHTML = "";
+    $(kind + "Brk").innerHTML = "";
     S.edit[kind] = null; $(kind + "Save").textContent = "Add"; $(kind + "Cancel").hidden = true; $(kind + "Err").textContent = "";
   };
   $(kind + "Form").addEventListener("click", e => {
     const chip = e.target.closest("[data-chip]"); if (!chip) return;
     $(kind + "Desc").value = chip.dataset.chip; $(kind + "Method").value = "cash";
-    if (kind === "expense" && /breakfast|lunch/i.test(chip.dataset.chip) && !$("brkRows").children.length) { brkRow().querySelector(".b-name").focus(); return; }
+    if (kind === "expense" && /breakfast|lunch/i.test(chip.dataset.chip) && !$("expenseBrk").children.length) { brkRow("expense").querySelector(".b-name").focus(); syncBrk("expense"); return; }
     $(kind + "Amt").focus();
   });
   $(kind + "Form").addEventListener("submit", async e => {
     e.preventDefault();
     if (!canEdit()) return;
-    const details = kind === "expense" ? readBrk() : [];
+    const details = readBrk(kind);
     const amount = details.length ? r2(details.reduce((a, x) => a + x.amount, 0)) : r2(num($(kind + "Amt").value));
     if (!$(kind + "Desc").value.trim()) { $(kind + "Err").textContent = "Enter a description."; return; }
     if (amount <= 0) { $(kind + "Err").textContent = "Enter an amount above zero."; return; }
     const body = { branch_id: S.branch, date: S.date, description: $(kind + "Desc").value.trim(), amount, method: $(kind + "Method").value };
-    if (kind === "expense") body.details = details;
+    body.details = details;
     const editId = S.edit[kind];
     $(kind + "Save").disabled = true;
     try {
@@ -603,7 +628,7 @@ $("brkRows").addEventListener("input", syncBrk);
   $(kind + "Cancel").onclick = () => { reset(); render(); };
   $(kind + "Table").addEventListener("click", e => tableAction(e, kind, r => {
     $(kind + "Desc").value = r.desc || ""; $(kind + "Amt").value = num(r.amount) || ""; $(kind + "Method").value = r.method || "cash";
-    if (kind === "expense") { $("brkRows").innerHTML = ""; (r.details || []).forEach(x => brkRow(x)); syncBrk(); }
+    $(kind + "Brk").innerHTML = ""; (r.details || []).forEach(x => brkRow(kind, x)); syncBrk(kind);
     S.edit[kind] = r.id; $(kind + "Save").textContent = "Update"; $(kind + "Cancel").hidden = false;
     $(kind + "Form").scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, reset));
@@ -769,7 +794,8 @@ function daySheetRows(branchId, date, d) {
   const lineRows = (cat) => {
     const list = c.lines.filter(l => l.it.category === cat);
     list.forEach(({ bill, it }, i) => push([{ v: i + 1, int: true, s: st.cell }, { v: bill.ref || "", s: st.cell }, { v: it.serial || "", s: st.imei },
-      { v: (it.qty > 1 ? it.qty + " x " : "") + (it.item || "").toUpperCase(), s: st.cell }, { v: (it.sales_rep || "").toUpperCase(), s: st.cell },
+      { v: (it.qty > 1 ? it.qty + " x " : "") + (it.item || "").toUpperCase(), s: st.cell },
+      { v: (it.sales_rep || "").toUpperCase(), s: it.highlight ? { ...st.cell, alignment: { horizontal: "center" }, fill: { fgColor: { rgb: hlXl(it.highlight) } } } : { ...st.cell, alignment: { horizontal: "center" } } },
       ...PAY.map(p => blankIfZero(num(it.pay[p.k]))), N(payTotal(it.pay)),
       { v: [bill.desc, bill.phone, it.warranty_days ? warName(it.warranty_days) + " warranty" : "", bill.remarks].filter(Boolean).join(" · "), s: st.cell }]));
     const by = cat === "phone" ? c.pBy : c.aBy;
@@ -796,8 +822,8 @@ function daySheetRows(branchId, date, d) {
   const expRows = [...c.exp]; if (c.banked) expRows.push({ desc: "Cash banked", method: "cash", amount: c.banked });
   small(expRows, "EXPENSES", c.lessExp);
 
-  // expense breakdowns (e.g. breakfast & lunch per person)
-  c.exp.filter(x => (x.details || []).length).forEach(x => {
+  // income & expense breakdowns (e.g. breakfast & lunch per person, charity 50 + 50)
+  [...c.inc, ...c.exp].filter(x => (x.details || []).length).forEach(x => {
     push([{ v: "", s: {} }, { v: "", s: {} }, { v: "", s: {} }, { v: x.desc.toUpperCase(), s: st.head }, { v: "AMOUNT", s: st.head }]);
     x.details.forEach(dt => push(["", "", "", { v: String(dt.name).toUpperCase(), s: st.cell }, N(num(dt.amount))]));
     push(["", "", "", { v: "TOTAL", s: st.totL }, N(x.amount, st.tot)]);
@@ -876,30 +902,35 @@ $("exRange").onclick = async () => {
   const list = Object.values(map).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.branch < b.branch ? -1 : 1);
   const H = arr => arr.map(v => ({ v, s: st.head }));
   const sum = [H(["Date", "Branch", "Phones", "Accessories", ...PAY.map(p => p.n), "Total sales", "Card transactions", "Other income", "Expenses", "Net sales", "Cash in hand", "Counted", "Difference"])];
-  const lines = [H(["Date", "Branch", "Bill no.", "Type", "IMEI", "Description", "Qty", "Sales rep", ...PAY.map(p => p.n), "Total", "Warranty", "Warranty until", "Customer", "Phone"])];
-  const inc = [H(["Date", "Branch", "Description", "Received by", "Amount"])], exp = [H(["Date", "Branch", "Description", "Paid by", "Amount", "Breakdown"])];
+  const lines = [H(["Date", "Branch", "Bill no.", "Type", "IMEI", "Description", "Qty", "Sales rep", "Highlight", ...PAY.map(p => p.n), "Total", "Warranty", "Warranty until", "Customer", "Phone"])];
+  const inc = [H(["Date", "Branch", "Description", "Received by", "Amount", "Breakdown"])], exp = [H(["Date", "Branch", "Description", "Paid by", "Amount", "Breakdown"])];
   const reps = {};
   list.forEach(d => {
     const c = calc(d), bn = bname(d.branch);
     sum.push([d.date, bn, N(c.phones), N(c.accs), ...PAY.map(p => N(c.sBy[p.k])), N(c.totalSales), N(c.card), N(c.otherIncome), N(c.lessExp), N(c.net), N(c.expected), c.counted == null ? "" : N(c.counted), c.diff == null ? "" : N(c.diff)]);
     c.lines.forEach(({ bill, it }) => {
       lines.push([d.date, bn, bill.ref || "", it.category === "phone" ? "Phone" : "Accessory", it.serial || "", it.item, { v: it.qty, int: true }, it.sales_rep || "",
+        it.highlight ? { v: hlName(it.highlight), s: { fill: { fgColor: { rgb: hlXl(it.highlight) } } } } : "",
         ...PAY.map(p => blankIfZero(num(it.pay[p.k]), {})), N(payTotal(it.pay), {}), warName(it.warranty_days), it.warranty_until || "", bill.desc || "", bill.phone || ""]);
       const key = (it.sales_rep || "(no rep)") + "|" + bn;
-      const o = reps[key] || (reps[key] = { rep: it.sales_rep || "(no rep)", branch: bn, phones: 0, pAmt: 0, accs: 0, aAmt: 0 });
+      const o = reps[key] || (reps[key] = { rep: it.sales_rep || "(no rep)", branch: bn, phones: 0, pAmt: 0, accs: 0, aAmt: 0, hl: {} });
       if (it.category === "phone") { o.phones += 1; o.pAmt += payTotal(it.pay); } else { o.accs += it.qty; o.aAmt += payTotal(it.pay); }
+      if (it.highlight) { const h = o.hl[it.highlight] || (o.hl[it.highlight] = { n: 0, amt: 0 }); h.n += it.category === "phone" ? 1 : it.qty; h.amt += payTotal(it.pay); }
     });
     inc.push([d.date, bn, "Yesterday cash", "Cash", N(c.opening, {})]);
-    c.inc.forEach(r => inc.push([d.date, bn, r.desc || "", payName(r.method), N(r.amount, {})]));
+    c.inc.forEach(r => inc.push([d.date, bn, r.desc || "", payName(r.method), N(r.amount, {}), (r.details || []).map(x => x.name + " " + fmt(num(x.amount))).join(", ")]));
     c.exp.forEach(r => exp.push([d.date, bn, r.desc || "", payName(r.method), N(r.amount, {}), (r.details || []).map(x => x.name + " " + fmt(num(x.amount))).join(", ")]));
   });
-  const repRows = [H(["Sales rep", "Branch", "Phones sold", "Phones amount", "Accessories sold", "Accessories amount", "Total amount"])];
-  Object.values(reps).sort((a, b) => (b.pAmt + b.aAmt) - (a.pAmt + a.aAmt)).forEach(o => repRows.push([o.rep, o.branch, { v: o.phones, int: true }, N(o.pAmt, {}), { v: o.accs, int: true }, N(o.aAmt, {}), N(o.pAmt + o.aAmt, {})]));
+  // highlighted (commission) items per colour, with the colour as the heading fill
+  const repRows = [[...H(["Sales rep", "Branch", "Phones sold", "Phones amount", "Accessories sold", "Accessories amount", "Total amount"]),
+    ...HIGHLIGHTS.flatMap(h => [{ v: h.n + " items", s: { ...st.head, fill: { fgColor: { rgb: h.xl } } } }, { v: h.n + " amount", s: { ...st.head, fill: { fgColor: { rgb: h.xl } } } }])]];
+  Object.values(reps).sort((a, b) => (b.pAmt + b.aAmt) - (a.pAmt + a.aAmt)).forEach(o => repRows.push([o.rep, o.branch, { v: o.phones, int: true }, N(o.pAmt, {}), { v: o.accs, int: true }, N(o.aAmt, {}), N(o.pAmt + o.aAmt, {}),
+    ...HIGHLIGHTS.flatMap(h => o.hl[h.k] ? [{ v: o.hl[h.k].n, int: true }, N(o.hl[h.k].amt, {})] : ["", ""])]));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, makeSheet(sum, [12, 14, 14, 14, ...PAY.map(() => 12), 14, 14, 14, 14, 14, 14, 14, 12]), "Daily Summary");
-  XLSX.utils.book_append_sheet(wb, makeSheet(lines, [12, 14, 10, 11, 18, 40, 6, 14, ...PAY.map(() => 12), 13, 12, 13, 18, 14]), "Phones & Accessories");
-  XLSX.utils.book_append_sheet(wb, makeSheet(repRows, [18, 14, 12, 15, 15, 17, 15]), "Sales by Rep");
-  XLSX.utils.book_append_sheet(wb, makeSheet(inc, [12, 14, 30, 14, 14]), "Income");
+  XLSX.utils.book_append_sheet(wb, makeSheet(lines, [12, 14, 10, 11, 18, 40, 6, 14, 10, ...PAY.map(() => 12), 13, 12, 13, 18, 14]), "Phones & Accessories");
+  XLSX.utils.book_append_sheet(wb, makeSheet(repRows, [18, 14, 12, 15, 15, 17, 15, ...HIGHLIGHTS.flatMap(() => [13, 15])]), "Sales by Rep");
+  XLSX.utils.book_append_sheet(wb, makeSheet(inc, [12, 14, 30, 14, 14, 60]), "Income");
   XLSX.utils.book_append_sheet(wb, makeSheet(exp, [12, 14, 30, 14, 14, 60]), "Expenses");
   saveWb(wb, `Sales Report ${from} to ${to}.xlsx`);
 };
