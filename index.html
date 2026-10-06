@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#1b6a45">
-<title>Daily Sales Book</title>
+<title>Workspace</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -15,9 +15,9 @@
 
 <!-- ===== Login ===== -->
 <div class="app" id="loginView" hidden>
-  <form class="panel login" id="loginForm" autocomplete="on">
-    <label class="f">Email<input type="email" id="loginEmail" autocomplete="username" required></label>
-    <label class="f">Password<input type="password" id="loginPass" autocomplete="current-password" required></label>
+  <form class="panel login" id="loginForm" autocomplete="off" novalidate>
+    <label class="f">Email<input type="text" inputmode="email" id="loginEmail" name="f-a" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" required></label>
+    <label class="f">Password<input type="text" id="loginPass" name="f-b" class="maskpw" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" required></label>
     <button class="primary" type="submit" id="loginBtn">Sign in</button>
     <span class="err" id="loginErr" role="alert"></span>
   </form>
@@ -31,7 +31,7 @@
 <!-- ===== App ===== -->
 <div class="app" id="app" hidden>
   <header class="top">
-    <div class="brand"><h1>Daily Sales Book</h1><span class="status" id="status">Loading…</span></div>
+    <div class="brand"><h1 id="appTitle">Workspace</h1><span class="status" id="status">Loading…</span></div>
     <div class="datebar">
       <button class="iconbtn" id="prevDay" aria-label="Previous day">‹</button>
       <input type="date" id="date" aria-label="Report date">
@@ -112,6 +112,7 @@
 
     <section class="panel" id="cashPanel">
       <div class="panel-head"><h2>Day summary &amp; cash count</h2><span class="meta">Count the notes in the drawer</span></div>
+      <div class="draftnote" id="cashDraft" hidden></div>
       <div class="recon">
         <div class="recon-inputs">
           <div class="calc" id="calc"></div>
