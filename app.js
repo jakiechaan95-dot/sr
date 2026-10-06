@@ -175,19 +175,42 @@ async function loadRange(from, to) {
   ]);
   return buildDays(d, s, i, e, it);
 }
+// Load one day: a single request to the database (get_day). Falls back to the
+// older multi-request way if the database update has not been run yet.
+let useGetDay = true;
+async function loadDay(date) {
+  if (useGetDay) {
+    const res = await sb.rpc("get_day", { p_date: date });
+    if (!res.error && res.data) {
+      const d = res.data;
+      return { all: buildDays(d.days, d.sales, d.income, d.expenses, d.items), prev: d.prev || {} };
+    }
+    if (res.error && !/get_day|function|schema cache/i.test(res.error.message || "")) throw res.error;
+    useGetDay = false;
+  }
+  const [all, closes] = await Promise.all([
+    loadRange(date, date),
+    Promise.all(S.branches.map(b => sb.rpc("prev_closing", { p_branch: b.id, p_date: date })))
+  ]);
+  const prev = {}; S.branches.forEach((b, i) => { if (closes[i] && !closes[i].error) prev[b.id] = closes[i].data; });
+  return { all, prev };
+}
+let refreshing = null, refreshAgain = false;
 async function refresh() {
+  // never run two loads at once; if asked again while loading, load once more after
+  if (refreshing) { refreshAgain = true; return refreshing; }
+  refreshing = doRefresh();
+  try { await refreshing; } finally { refreshing = null; if (refreshAgain) { refreshAgain = false; refresh(); } }
+}
+async function doRefresh() {
   const date = S.date;
   try {
-    // Previous day's closing comes from a database function that returns only the number.
-    const [all, closes] = await Promise.all([
-      loadRange(date, date),
-      Promise.all(S.branches.map(b => sb.rpc("prev_closing", { p_branch: b.id, p_date: date })))
-    ]);
+    const { all, prev } = await loadDay(date);
     if (date !== S.date) return;
     const o = {}; S.prevClose = {};
-    S.branches.forEach((b, i) => {
+    S.branches.forEach(b => {
       if (all[b.id + "|" + date]) o[b.id] = all[b.id + "|" + date];
-      const pc = closes[i] && !closes[i].error ? closes[i].data : null;
+      const pc = prev[b.id];
       if (pc !== null && pc !== undefined) S.prevClose[b.id] = num(pc);
     });
     S.days = o; rememberReps(); render();
@@ -214,10 +237,13 @@ async function autoCarry(date) {
   }
   if (changed && date === S.date) scheduleRefresh();
 }
-function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 250); }
+let quietUntil = 0;
+function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 300); }
+// live updates from other devices; the echo of our own save is skipped (we already reloaded)
+function liveChange() { if (Date.now() < quietUntil) return; scheduleRefresh(); }
 async function write(fn) {
   setStatus("Saving…");
-  try { await fn(); await refresh(); }
+  try { quietUntil = Date.now() + 2500; await fn(); quietUntil = Date.now() + 1500; clearTimeout(refreshTimer); await refresh(); }
   catch (e) {
     setStatus("Not saved");
     const msg = String(e.message || e);
@@ -236,9 +262,9 @@ function subscribeLive() {
   const f = "date=eq." + S.date;
   channel = sb.channel("day-" + S.date);
   ["days", "sales", "other_income", "expenses", "sale_items"].forEach(t =>
-    channel.on("postgres_changes", { event: "*", schema: "public", table: t, filter: f }, scheduleRefresh));
+    channel.on("postgres_changes", { event: "*", schema: "public", table: t, filter: f }, liveChange));
   ["sales", "other_income", "expenses", "sale_items"].forEach(t =>
-    channel.on("postgres_changes", { event: "DELETE", schema: "public", table: t }, scheduleRefresh));
+    channel.on("postgres_changes", { event: "DELETE", schema: "public", table: t }, liveChange));
   channel.on("postgres_changes", { event: "*", schema: "public", table: "branches" }, loadBranches);
   channel.subscribe();
 }
@@ -269,6 +295,7 @@ function simplePanel(kind, title, verb, ph) {
   const brk = `<div class="brk" id="${kind}Brk"></div><button type="button" class="ghost small" id="${kind}AddBrk">+ Breakdown line ${kind === "expense" ? "(e.g. lunch per person)" : "(e.g. charity 50 + 50)"}</button>`;
   return `<div class="panel-head"><h2>${title}</h2><span class="meta" id="${kind}Meta"></span></div>
   <form class="entry" id="${kind}Form" autocomplete="off">
+    <div class="draftnote" id="${kind}Draft" hidden></div>
     ${chips}
     <div class="fields">
       <label class="f">Description<input id="${kind}Desc" maxlength="80" placeholder="${ph}"></label>
@@ -594,10 +621,10 @@ $("saleForm").addEventListener("submit", async e => {
   try {
     await write(async () => check(await sb.rpc("save_invoice", { p_id: editId, p_sale: sale, p_items: lines })));
     rememberReps(lines.map(l => l.sales_rep));
-    resetSale(); render(); $("sRef").focus();
+    clearDraft("bill"); resetSale(); render(); $("sRef").focus();
   } catch (_) { /* banner shown */ } finally { $("sSave").disabled = false; }
 });
-$("sCancel").onclick = () => { resetSale(); render(); };
+$("sCancel").onclick = () => { clearDraft("bill"); resetSale(); render(); };
 function editBill(bill) {
   $("sRef").value = bill.ref || ""; $("sDesc").value = bill.desc || ""; $("sPhone").value = bill.phone || ""; $("sRemarks").value = bill.remarks || "";
   $("itemRows").innerHTML = ""; bill.items.forEach(it => addLine(it.category, it));
@@ -686,10 +713,10 @@ function syncBrk(kind) {
     $(kind + "Save").disabled = true;
     try {
       await write(async () => check(editId ? await sb.from(TABLE[kind]).update(body).eq("id", editId) : await sb.from(TABLE[kind]).insert(body)));
-      reset(); render(); $(kind + "Desc").focus();
+      clearDraft(kind); reset(); render(); $(kind + "Desc").focus();
     } catch (_) {} finally { $(kind + "Save").disabled = false; }
   });
-  $(kind + "Cancel").onclick = () => { reset(); render(); };
+  $(kind + "Cancel").onclick = () => { clearDraft(kind); reset(); render(); };
   $(kind + "Table").addEventListener("click", e => tableAction(e, kind, r => {
     $(kind + "Desc").value = r.desc || ""; $(kind + "Amt").value = r.calc || num(r.amount) || ""; showCalc($(kind + "Amt")); $(kind + "Method").value = r.method || "cash";
     $(kind + "Brk").innerHTML = ""; (r.details || []).forEach(x => brkRow(kind, x)); syncBrk(kind);
@@ -697,6 +724,96 @@ function syncBrk(kind) {
     $(kind + "Form").scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, reset));
 });
+
+/* ================= drafts: unsaved forms survive sign-out ================= */
+// Kept only on this device, only for the same login and branch; removed when saved, cancelled or discarded.
+const DRAFT_MAX_AGE = 3 * 24 * 3600 * 1000;
+const draftKey = () => S.uid && S.branch && S.branch !== "all" ? "dsb-draft:" + S.uid + ":" + S.branch : null;
+function readDraft() { const k = draftKey(); if (!k) return null; try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (_) { return null; } }
+function writeDraft(d) {
+  const k = draftKey(); if (!k) return;
+  try { if (!d || (!d.bill && !d.income && !d.expense)) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(d)); } catch (_) {}
+}
+function grabBill() {
+  const f = { ref: $("sRef").value, desc: $("sDesc").value, phone: $("sPhone").value, remarks: $("sRemarks").value, editId: S.edit.sale || null, lines: [] };
+  $("itemRows").querySelectorAll(".itemrow").forEach(row => {
+    const pay = {}; row.querySelectorAll(".i-pay").forEach(i => { if (i.value !== "") pay[i.dataset.k] = i.value; });
+    f.lines.push({ category: row.dataset.cat, item: row.querySelector(".i-name").value,
+      serial: row.dataset.cat === "phone" ? row.querySelector(".i-serial").value : "",
+      qty: row.querySelector(".i-qty").value, sales_rep: row.querySelector(".i-rep").value,
+      warranty_days: Number(row.querySelector(".i-war").value) || 0, highlight: row.dataset.hl || "", pay });
+  });
+  const empty = !f.ref.trim() && !f.desc.trim() && !f.phone.trim() && !f.remarks.trim() && !f.lines.length;
+  return empty ? null : f;
+}
+function grabKind(kind) {
+  const f = { desc: $(kind + "Desc").value, amt: $(kind + "Amt").value, method: $(kind + "Method").value, editId: S.edit[kind] || null, brk: [] };
+  $(kind + "Brk").querySelectorAll(".brkrow").forEach(r => f.brk.push({ name: r.querySelector(".b-name").value, amt: r.querySelector(".b-amt").value }));
+  return !f.desc.trim() && !String(f.amt).trim() && !f.brk.length ? null : f;
+}
+function saveDraftNow() {
+  if (!S.me || S.branch === "all" || !canEdit() || S.restoring) return;
+  writeDraft({ t: Date.now(), date: S.date, bill: grabBill(), income: grabKind("income"), expense: grabKind("expense") });
+}
+let draftTimer = null;
+function saveDraftSoon() { clearTimeout(draftTimer); draftTimer = setTimeout(saveDraftNow, 400); }
+function clearDraft(part) {
+  const d = readDraft(); if (!d) return;
+  d[part] = null; writeDraft(d);
+  const note = $(part === "bill" ? "billDraft" : part + "Draft"); if (note) note.hidden = true;
+}
+function draftNote(id, d, what) {
+  const t = new Date(d.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const other = d.date && d.date !== S.date ? ` from ${prettyDate(d.date)}` : "";
+  const n = $(id);
+  n.innerHTML = `<span>Unsaved ${what} restored${other} (last typed ${t}). Check it and save.</span><button type="button" class="linkbtn" data-discard="1">Discard</button>`;
+  n.hidden = false;
+}
+// Put drafts back into empty forms (after sign-in, or switching branch/date).
+function restoreDrafts() {
+  const d = readDraft();
+  ["billDraft", "incomeDraft", "expenseDraft"].forEach(id => { $(id).hidden = true; });
+  if (!d) return;
+  if (Date.now() - (d.t || 0) > DRAFT_MAX_AGE) { writeDraft(null); return; }
+  if (!canEdit() || S.branch === "all") return;
+  S.restoring = true;
+  try {
+    if (d.bill && !$("itemRows").children.length && !$("sRef").value) {
+      const b = d.bill;
+      $("sRef").value = b.ref || ""; $("sDesc").value = b.desc || ""; $("sPhone").value = b.phone || ""; $("sRemarks").value = b.remarks || "";
+      (b.lines || []).forEach(l => addLine(l.category === "phone" ? "phone" : "accessory", { ...l, qty: l.qty || 1 }));
+      const day = S.days[S.branch];
+      if (b.editId && day && day.sales && day.sales[b.editId]) {
+        S.edit.sale = b.editId; $("sSave").textContent = "Update bill"; $("billTitle").textContent = "Edit bill " + (b.ref || ""); $("sCancel").hidden = false;
+      }
+      updBillTotal();
+      draftNote("billDraft", d, "bill");
+    }
+    ["income", "expense"].forEach(kind => {
+      const k = d[kind];
+      if (!k || $(kind + "Desc").value || $(kind + "Brk").children.length) return;
+      $(kind + "Desc").value = k.desc || ""; $(kind + "Method").value = k.method || "cash";
+      $(kind + "Brk").innerHTML = ""; (k.brk || []).forEach(x => brkRow(kind, { name: x.name, calc: x.amt }));
+      if (k.brk && k.brk.length) syncBrk(kind); else { $(kind + "Amt").value = k.amt || ""; showCalc($(kind + "Amt")); }
+      if (k.editId) { S.edit[kind] = k.editId; $(kind + "Save").textContent = "Update"; $(kind + "Cancel").hidden = false; }
+      draftNote(kind + "Draft", d, kind === "income" ? "income entry" : "expense");
+    });
+  } finally { S.restoring = false; }
+}
+["saleForm", "incomeForm", "expenseForm"].forEach(id => {
+  $(id).addEventListener("input", saveDraftSoon);
+  $(id).addEventListener("click", e => {
+    const dis = e.target.closest("[data-discard]");
+    if (dis) {
+      if (id === "saleForm") { clearDraft("bill"); resetSale(); }
+      else { const kind = id.replace("Form", ""); clearDraft(kind); $(kind + "Cancel").click(); }
+      render(); return;
+    }
+    saveDraftSoon();
+  });
+});
+document.addEventListener("visibilitychange", () => { if (document.hidden) saveDraftNow(); });
+window.addEventListener("pagehide", saveDraftNow);
 
 function tableAction(e, coll, onEdit, onReset) {
   const btn = e.target.closest("button[data-act]"); if (!btn || !canEdit()) return;
@@ -764,8 +881,9 @@ $("lookupForm").addEventListener("submit", async e => {
 function setDate(d) {
   if (!d) return;
   if (S.me && !isAdmin()) d = todayISO();
+  saveDraftNow();
   S.date = d; S.days = {}; S.hlOpen = null; resetSale(); S.edit.income = S.edit.expense = null; $("cashMsg").textContent = "";
-  render(); subscribeLive(); refresh();
+  render(); subscribeLive(); refresh(); restoreDrafts();
 }
 $("date").addEventListener("change", e => setDate(e.target.value));
 $("prevDay").onclick = () => setDate(shift(S.date, -1));
@@ -787,13 +905,16 @@ window.addEventListener("pageshow", checkDayChange);
 $("branchTabs").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.id === "renameBtn") { openSettings(); return; }
+  saveDraftNow();
   S.branch = b.dataset.b; resetSale(); S.edit.income = S.edit.expense = null; $("cashMsg").textContent = "";
+  ["income", "expense"].forEach(k => { $(k + "Desc").value = ""; $(k + "Amt").value = ""; $(k + "Amt").disabled = false; $(k + "Brk").innerHTML = ""; $(k + "Save").textContent = "Add"; $(k + "Cancel").hidden = true; });
   try { localStorage.setItem("dsb-branch", S.branch); } catch (_) {}
-  render();
+  render(); restoreDrafts();
 });
 function openSettings() {
   (S.allBranches || S.branches).forEach(b => { $("bn_" + b.id).value = b.name; $("ba_" + b.id).value = b.address || ""; });
   $("settingsPanel").hidden = false; $("bn_b1").focus();
+  loadLocked();
 }
 $("settingsClose").onclick = () => $("settingsPanel").hidden = true;
 $("settingsForm").addEventListener("submit", async e => {
@@ -944,22 +1065,35 @@ function saveWb(wb, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
   $("exMsg").textContent = "Downloaded " + a.download + ".";
 }
-function needXlsx() { if (window.XLSX) return true; $("exMsg").textContent = "The Excel tool did not load. Check your connection and reload."; return false; }
-$("exOne").onclick = () => {
-  if (!isAdmin() || !needXlsx() || S.branch === "all") return;
+// The Excel library (~140 KB) is only downloaded when admin first asks for a file.
+let xlsxLoading = null;
+function needXlsx() {
+  if (window.XLSX) return Promise.resolve(true);
+  $("exMsg").textContent = "Preparing Excel…";
+  xlsxLoading = xlsxLoading || new Promise(res => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js";
+    sc.onload = () => res(true);
+    sc.onerror = () => { xlsxLoading = null; res(false); };
+    document.head.appendChild(sc);
+  });
+  return xlsxLoading.then(ok => { if (!ok || !window.XLSX) { $("exMsg").textContent = "The Excel tool did not load. Check your connection and try again."; return false; } return true; });
+}
+$("exOne").onclick = async () => {
+  if (!isAdmin() || S.branch === "all" || !(await needXlsx())) return;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, daySheetRows(S.branch, S.date, S.days[S.branch]), sheetName(bname(S.branch)));
   saveWb(wb, `${bname(S.branch)} ${S.date}.xlsx`);
 };
-$("exAll").onclick = () => {
-  if (!isAdmin() || !needXlsx()) return;
+$("exAll").onclick = async () => {
+  if (!isAdmin() || !(await needXlsx())) return;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, allSheet(S.date, S.days), "All Branches");
   S.branches.forEach(b => XLSX.utils.book_append_sheet(wb, daySheetRows(b.id, S.date, S.days[b.id]), sheetName(b.name)));
   saveWb(wb, `All Branches ${S.date}.xlsx`);
 };
 $("exRange").onclick = async () => {
-  if (!isAdmin() || !needXlsx()) return;
+  if (!isAdmin() || !(await needXlsx())) return;
   const from = $("exFrom").value, to = $("exTo").value;
   if (!from || !to || from > to) { $("exMsg").textContent = "Pick a From date that is on or before the To date."; return; }
   $("exMsg").textContent = "Collecting entries…";
@@ -1001,33 +1135,153 @@ $("exRange").onclick = async () => {
 };
 
 /* ================= auth & start ================= */
-function showLogin() { $("app").hidden = true; $("loginView").hidden = false; }
+const IDLE_MS = 5 * 60 * 1000;      // sign out after 5 minutes without activity
+const WARN_MS = 30 * 1000;          // warn 30 seconds before
+const DEVICE_LOCK_MS = 30 * 60 * 1000; // this device shows "Access denied" for 30 minutes
+const LS = { active: "dsb-last-active", fails: "dsb-device-fails", denied: "dsb-denied-until" };
+const lsGet = k => { try { return localStorage.getItem(k); } catch (_) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
+const lsDel = k => { try { localStorage.removeItem(k); } catch (_) {} };
+
+function denyAccess() {
+  // 3 wrong passwords: block this device, then leave the website
+  lsSet(LS.denied, String(Date.now() + DEVICE_LOCK_MS));
+  if (sb) sb.auth.signOut().catch(() => {});
+  $("app").hidden = true; $("loginView").hidden = true; $("deniedView").hidden = false;
+  ["loginEmail", "loginPass"].forEach(id => { $(id).value = ""; });
+  setTimeout(() => { try { location.replace("about:blank"); } catch (_) {} }, 2500);
+}
+function deviceDenied() { return Number(lsGet(LS.denied) || 0) > Date.now(); }
+
+// Empty every form on screen (used at sign-out so the next person sees nothing).
+function clearForms() {
+  try {
+    resetSale();
+    ["income", "expense"].forEach(k => {
+      $(k + "Desc").value = ""; $(k + "Amt").value = ""; $(k + "Amt").disabled = false; $(k + "Brk").innerHTML = "";
+      $(k + "Method").value = "cash"; $(k + "Save").textContent = "Add"; $(k + "Cancel").hidden = true; $(k + "Err").textContent = "";
+      showCalc($(k + "Amt"));
+    });
+    S.edit.income = S.edit.expense = null;
+    ["billDraft", "incomeDraft", "expenseDraft"].forEach(id => { $(id).hidden = true; });
+    ["opening", "notes", "lookupQ"].forEach(id => { $(id).value = ""; });
+    $("lookupWrap").hidden = true; $("lookupMsg").textContent = "";
+    S.days = {}; S.uid = null;
+  } catch (_) {}
+}
+function showLogin(msg) {
+  clearForms();
+  if (deviceDenied()) { denyAccess(); return; }
+  $("app").hidden = true; $("deniedView").hidden = true; $("loginView").hidden = false;
+  $("loginPass").value = "";
+  $("loginErr").textContent = msg || "";
+}
+
+/* ---- sign out after 5 minutes without activity ---- */
+let lastActive = Date.now(), idleTimer = null, warnEl = null;
+function markActive() {
+  const now = Date.now();
+  if (now - lastActive > 5000) lsSet(LS.active, String(now)); // write at most every 5 s
+  lastActive = now;
+  if (warnEl) { warnEl.remove(); warnEl = null; }
+}
+["pointerdown", "keydown", "input", "touchstart", "wheel"].forEach(ev => document.addEventListener(ev, markActive, { passive: true, capture: true }));
+function idleCheck() {
+  if (!S.me) return;
+  const last = Math.max(lastActive, Number(lsGet(LS.active) || 0));
+  const left = IDLE_MS - (Date.now() - last);
+  if (left <= 0) { idleSignOut(); return; }
+  if (left <= WARN_MS && !warnEl) {
+    warnEl = document.createElement("div"); warnEl.className = "idlewarn"; warnEl.setAttribute("role", "alert");
+    document.body.appendChild(warnEl);
+  }
+  if (warnEl) warnEl.textContent = `No activity: signing out in ${Math.ceil(left / 1000)} s. Tap anywhere to stay.`;
+}
+async function idleSignOut() {
+  clearTimeout(draftTimer); saveDraftNow(); // keep the unsaved bill as a draft
+  if (warnEl) { warnEl.remove(); warnEl = null; }
+  if (channel) sb.removeChannel(channel); channel = null;
+  S.me = null; clearForms();
+  await sb.auth.signOut().catch(() => {});
+  showLogin("Signed out after 5 minutes without activity.");
+}
+function startIdleWatch() {
+  lastActive = Date.now(); lsSet(LS.active, String(lastActive));
+  clearInterval(idleTimer); idleTimer = setInterval(idleCheck, 1000);
+}
+// phone woke up / tab came back: check straight away
+document.addEventListener("visibilitychange", () => { if (!document.hidden) idleCheck(); });
+
 async function showApp(session) {
+  if (deviceDenied()) { denyAccess(); return; }
+  // reopened after more than 5 minutes away: sign in again
+  const last = Number(lsGet(LS.active) || 0);
+  if (last && Date.now() - last > IDLE_MS && !S.justSignedIn) { await sb.auth.signOut().catch(() => {}); showLogin("Signed out after 5 minutes without activity."); return; }
+  S.justSignedIn = false;
+  const email = session.user.email || "";
+  // locked accounts get nothing
+  const lk = await sb.rpc("login_check", { p_email: email });
+  if (!lk.error && lk.data === true) { await sb.auth.signOut().catch(() => {}); showLogin("This login is locked after 3 wrong passwords. Ask the admin to unlock it."); return; }
   const res = await sb.from("staff").select("role, branch_id").eq("user_id", session.user.id).maybeSingle();
   if (res.error || !res.data) {
     S.me = null;
-    $("app").hidden = true; $("loginView").hidden = false;
-    $("loginErr").textContent = res.error ? "Could not check your access: " + res.error.message
-      : `${session.user.email} is not linked to a branch yet. Ask the admin to add you, then sign in again.`;
     await sb.auth.signOut();
+    showLogin(res.error ? "Could not check your access: " + res.error.message : `${email} is not linked to a branch yet. Ask the admin to add you.`);
     return;
   }
+  sb.rpc("login_ok").then(() => {}, () => {});
+  S.uid = session.user.id;
+  lsDel(LS.fails);
   S.me = res.data;
   if (!isAdmin()) { S.branch = S.me.branch_id; S.date = todayISO(); }
   else if (S.branch !== "all" && !DEFAULT_BRANCHES.some(b => b.id === S.branch)) S.branch = "b1";
-  $("loginView").hidden = true; $("app").hidden = false;
-  $("userEmail").textContent = (session.user.email || "") + (isAdmin() ? " · admin" : "");
+  $("loginView").hidden = true; $("deniedView").hidden = true; $("app").hidden = false;
+  $("userEmail").textContent = email + (isAdmin() ? " · admin" : "");
+  startIdleWatch();
   await loadBranches();
-  render(); subscribeLive(); refresh();
+  resetSale(); render(); subscribeLive();
+  await refresh(); restoreDrafts();
 }
 $("loginForm").addEventListener("submit", async e => {
   e.preventDefault();
+  if (deviceDenied()) { denyAccess(); return; }
+  const email = $("loginEmail").value.trim(), pass = $("loginPass").value;
   $("loginErr").textContent = ""; $("loginBtn").disabled = true;
-  const { error } = await sb.auth.signInWithPassword({ email: $("loginEmail").value.trim(), password: $("loginPass").value });
-  $("loginBtn").disabled = false;
-  if (error) $("loginErr").textContent = error.message === "Invalid login credentials" ? "Email or password is wrong." : error.message;
+  try {
+    const lk = await sb.rpc("login_check", { p_email: email });
+    if (!lk.error && lk.data === true) { denyAccess(); return; }
+    S.justSignedIn = true;
+    const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+    if (!error) return; // showApp runs from the sign-in event
+    S.justSignedIn = false;
+    if (error.message !== "Invalid login credentials") { $("loginErr").textContent = error.message; return; }
+    // wrong password: count it for this email (database) and for this device
+    const r = await sb.rpc("login_failed", { p_email: email });
+    const devFails = Number(lsGet(LS.fails) || 0) + 1; lsSet(LS.fails, String(devFails));
+    const left = Math.min(r.error ? 3 : num(r.data), 3 - devFails);
+    if (left <= 0) { lsDel(LS.fails); denyAccess(); return; }
+    $("loginPass").value = ""; $("loginPass").focus();
+    $("loginErr").textContent = `Email or password is wrong. ${left} attempt${left === 1 ? "" : "s"} left.`;
+  } finally { $("loginBtn").disabled = false; }
 });
-$("signOut").onclick = async () => { if (channel) sb.removeChannel(channel); channel = null; await sb.auth.signOut(); };
+$("signOut").onclick = async () => { clearTimeout(draftTimer); saveDraftNow(); clearInterval(idleTimer); if (channel) sb.removeChannel(channel); channel = null; S.me = null; clearForms(); lsDel(LS.active); await sb.auth.signOut(); };
+
+/* ---- admin: locked logins ---- */
+async function loadLocked() {
+  const box = $("lockedList");
+  const r = await sb.rpc("locked_accounts");
+  if (r.error) { box.textContent = "Could not load locked logins."; return; }
+  if (!r.data.length) { box.textContent = "No locked logins."; return; }
+  box.innerHTML = r.data.map(x => `<div class="lockrow"><span><strong>${esc(x.email)}</strong> <span class="sub">locked ${new Date(x.locked_at).toLocaleString("en-GB")}</span></span>
+    <button type="button" class="ghost small" data-unlock="${esc(x.email)}">Unlock</button></div>`).join("");
+}
+$("lockedList").addEventListener("click", async e => {
+  const b = e.target.closest("[data-unlock]"); if (!b || !isAdmin()) return;
+  b.disabled = true;
+  const r = await sb.rpc("unlock_account", { p_email: b.dataset.unlock });
+  if (r.error || !r.data) { b.disabled = false; showBanner("Could not unlock: " + ((r.error && r.error.message) || "not allowed")); return; }
+  loadLocked();
+});
 
 async function init() {
   try { const b = localStorage.getItem("dsb-branch"); if (b && (b === "all" || DEFAULT_BRANCHES.some(x => x.id === b))) S.branch = b; } catch (_) {}
@@ -1041,13 +1295,15 @@ async function init() {
     $("loginBtn").disabled = true;
     return;
   }
+  try { const l = document.createElement("link"); l.rel = "preconnect"; l.href = new URL(cfg.SUPABASE_URL).origin; l.crossOrigin = ""; document.head.appendChild(l); } catch (_) {}
   sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+  if (deviceDenied()) { denyAccess(); return; }
   let current = null;
   sb.auth.onAuthStateChange((_evt, session) => {
     const id = session ? session.user.id : null;
     if (id === current) return;
     current = id;
-    if (session) showApp(session); else showLogin();
+    if (session) showApp(session); else if (!$("loginView").hidden || !S.me) showLogin($("loginErr").textContent); else showLogin();
   });
   const { data } = await sb.auth.getSession();
   if (!data.session && current === null) showLogin();
