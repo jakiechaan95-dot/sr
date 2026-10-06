@@ -732,7 +732,7 @@ const draftKey = () => S.uid && S.branch && S.branch !== "all" ? "dsb-draft:" + 
 function readDraft() { const k = draftKey(); if (!k) return null; try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (_) { return null; } }
 function writeDraft(d) {
   const k = draftKey(); if (!k) return;
-  try { if (!d || (!d.bill && !d.income && !d.expense)) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(d)); } catch (_) {}
+  try { if (!d || (!d.bill && !d.income && !d.expense && !d.cash)) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(d)); } catch (_) {}
 }
 function grabBill() {
   const f = { ref: $("sRef").value, desc: $("sDesc").value, phone: $("sPhone").value, remarks: $("sRemarks").value, editId: S.edit.sale || null, lines: [] };
@@ -753,7 +753,8 @@ function grabKind(kind) {
 }
 function saveDraftNow() {
   if (!S.me || S.branch === "all" || !canEdit() || S.restoring) return;
-  writeDraft({ t: Date.now(), date: S.date, bill: grabBill(), income: grabKind("income"), expense: grabKind("expense") });
+  writeDraft({ t: Date.now(), date: S.date, bill: grabBill(), income: grabKind("income"), expense: grabKind("expense"),
+    cash: Object.keys(S.cashDirty).length ? { ...S.cashDirty } : null });
 }
 let draftTimer = null;
 function saveDraftSoon() { clearTimeout(draftTimer); draftTimer = setTimeout(saveDraftNow, 400); }
@@ -772,7 +773,7 @@ function draftNote(id, d, what) {
 // Put drafts back into empty forms (after sign-in, or switching branch/date).
 function restoreDrafts() {
   const d = readDraft();
-  ["billDraft", "incomeDraft", "expenseDraft"].forEach(id => { $(id).hidden = true; });
+  ["billDraft", "incomeDraft", "expenseDraft", "cashDraft"].forEach(id => { $(id).hidden = true; });
   if (!d) return;
   if (Date.now() - (d.t || 0) > DRAFT_MAX_AGE) { writeDraft(null); return; }
   if (!canEdit() || S.branch === "all") return;
@@ -798,6 +799,20 @@ function restoreDrafts() {
       if (k.editId) { S.edit[kind] = k.editId; $(kind + "Save").textContent = "Update"; $(kind + "Cancel").hidden = false; }
       draftNote(kind + "Draft", d, kind === "income" ? "income entry" : "expense");
     });
+    // cash: yesterday cash, notes, note count typed but not saved -> put back and save now (same day only)
+    if (d.cash && d.date === S.date) {
+      const c = d.cash, f = {};
+      if ("opening" in c) { $("opening").value = c.opening || ""; f.opening = r2(num(c.opening)); }
+      if ("notes" in c) { $("notes").value = c.notes || ""; f.notes = c.notes || ""; }
+      if (c.denoms) {
+        NOTES.forEach(n => { $("dn_" + n).value = c.denoms[n] || ""; });
+        f.denoms = c.denoms; const t = NOTES.reduce((a, n) => a + n * num(c.denoms[n]), 0); f.counted = Object.keys(c.denoms).length ? t : null;
+      }
+      S.cashDirty = { ...c };
+      if (Object.keys(f).length) saveCash(f).catch(() => {});
+      const n = $("cashDraft"); n.hidden = false;
+      n.innerHTML = `<span>Unsaved cash entries restored and saved (${["opening" in c ? "yesterday cash" : "", "notes" in c ? "notes" : "", c.denoms ? "note count" : ""].filter(Boolean).join(", ")}).</span><button type="button" class="linkbtn" data-hide-note="1">OK</button>`;
+    } else if (d.cash) { d.cash = null; writeDraft(d); }
   } finally { S.restoring = false; }
 }
 ["saleForm", "incomeForm", "expenseForm"].forEach(id => {
@@ -812,6 +827,7 @@ function restoreDrafts() {
     saveDraftSoon();
   });
 });
+$("cashDraft").addEventListener("click", e => { if (e.target.closest("[data-hide-note]")) $("cashDraft").hidden = true; });
 document.addEventListener("visibilitychange", () => { if (document.hidden) saveDraftNow(); });
 window.addEventListener("pagehide", saveDraftNow);
 
@@ -829,8 +845,19 @@ function tableAction(e, coll, onEdit, onReset) {
 }
 
 /* ---- opening, notes, cash count ---- */
-$("opening").addEventListener("change", () => { if (S.branch !== "all" && canEdit()) saveDay({ opening: r2(num($("opening").value)) }).catch(() => {}); });
-$("notes").addEventListener("change", () => { if (S.branch !== "all" && canEdit()) saveDay({ notes: $("notes").value.trim() }).catch(() => {}); });
+// Cash fields save themselves; until the save is done they are also kept in the draft.
+S.cashDirty = {};
+function saveCash(fields) {
+  const keys = Object.keys(fields);
+  return saveDay(fields).then(() => {
+    keys.forEach(k => { if (k === "counted") return; if (JSON.stringify(S.cashDirty[k]) === JSON.stringify(fields[k])) delete S.cashDirty[k]; });
+    saveDraftSoon();
+  });
+}
+$("opening").addEventListener("input", () => { if (canEdit() && S.branch !== "all") { S.cashDirty.opening = r2(num($("opening").value)); saveDraftSoon(); } });
+$("notes").addEventListener("input", () => { if (canEdit() && S.branch !== "all") { S.cashDirty.notes = $("notes").value.trim(); saveDraftSoon(); } });
+$("opening").addEventListener("change", () => { if (S.branch !== "all" && canEdit()) saveCash({ opening: r2(num($("opening").value)) }).catch(() => {}); });
+$("notes").addEventListener("change", () => { if (S.branch !== "all" && canEdit()) saveCash({ notes: $("notes").value.trim() }).catch(() => {}); });
 let denomTimer = null;
 $("denomTable").addEventListener("input", e => {
   const inp = e.target.closest("input[data-note]"); if (!inp || !canEdit()) return;
@@ -839,7 +866,8 @@ $("denomTable").addEventListener("input", e => {
   NOTES.forEach(n => { const v = Math.max(0, Math.round(num($("dn_" + n).value))); if (v) { den[n] = v; total += n * v; any = true; } $("da_" + n).textContent = v ? fmt(n * v) : "–"; });
   $("denomTotal").textContent = any ? fmt(total) : "–";
   clearTimeout(denomTimer);
-  denomTimer = setTimeout(() => saveDay({ denoms: den, counted: any ? total : null }).catch(() => {}), 700);
+  S.cashDirty.denoms = den; saveDraftSoon();
+  denomTimer = setTimeout(() => { denomTimer = null; saveCash({ denoms: den, counted: any ? total : null }).catch(() => {}); }, 700);
 });
 $("prevCount").onclick = async () => {
   if (!canEdit()) return;
@@ -881,7 +909,7 @@ $("lookupForm").addEventListener("submit", async e => {
 function setDate(d) {
   if (!d) return;
   if (S.me && !isAdmin()) d = todayISO();
-  saveDraftNow();
+  saveDraftNow(); S.cashDirty = {};
   S.date = d; S.days = {}; S.hlOpen = null; resetSale(); S.edit.income = S.edit.expense = null; $("cashMsg").textContent = "";
   render(); subscribeLive(); refresh(); restoreDrafts();
 }
@@ -905,7 +933,7 @@ window.addEventListener("pageshow", checkDayChange);
 $("branchTabs").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.id === "renameBtn") { openSettings(); return; }
-  saveDraftNow();
+  saveDraftNow(); S.cashDirty = {};
   S.branch = b.dataset.b; resetSale(); S.edit.income = S.edit.expense = null; $("cashMsg").textContent = "";
   ["income", "expense"].forEach(k => { $(k + "Desc").value = ""; $(k + "Amt").value = ""; $(k + "Amt").disabled = false; $(k + "Brk").innerHTML = ""; $(k + "Save").textContent = "Add"; $(k + "Cancel").hidden = true; });
   try { localStorage.setItem("dsb-branch", S.branch); } catch (_) {}
@@ -1163,8 +1191,10 @@ function clearForms() {
       showCalc($(k + "Amt"));
     });
     S.edit.income = S.edit.expense = null;
-    ["billDraft", "incomeDraft", "expenseDraft"].forEach(id => { $(id).hidden = true; });
+    ["billDraft", "incomeDraft", "expenseDraft", "cashDraft"].forEach(id => { $(id).hidden = true; });
     ["opening", "notes", "lookupQ"].forEach(id => { $(id).value = ""; });
+    NOTES.forEach(n => { const i = document.getElementById("dn_" + n); if (i) i.value = ""; });
+    S.cashDirty = {};
     $("lookupWrap").hidden = true; $("lookupMsg").textContent = "";
     S.days = {}; S.uid = null;
   } catch (_) {}
@@ -1197,8 +1227,20 @@ function idleCheck() {
   }
   if (warnEl) warnEl.textContent = `No activity: signing out in ${Math.ceil(left / 1000)} s. Tap anywhere to stay.`;
 }
+// Push cash fields that are still waiting to the database (max 3 s), before a sign-out.
+async function flushCash() {
+  if (!S.me || !canEdit() || S.branch === "all") return;
+  const d = S.cashDirty, f = {};
+  if ("opening" in d) f.opening = d.opening;
+  if ("notes" in d) f.notes = d.notes;
+  if ("denoms" in d) { f.denoms = d.denoms; const t = NOTES.reduce((a, n) => a + n * num(d.denoms[n]), 0); f.counted = Object.keys(d.denoms).length ? t : null; }
+  clearTimeout(denomTimer); denomTimer = null;
+  if (!Object.keys(f).length) return;
+  await Promise.race([saveCash(f).catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
+}
 async function idleSignOut() {
-  clearTimeout(draftTimer); saveDraftNow(); // keep the unsaved bill as a draft
+  clearTimeout(draftTimer); saveDraftNow(); // keep everything unsaved as a draft
+  await flushCash(); saveDraftNow();
   if (warnEl) { warnEl.remove(); warnEl = null; }
   if (channel) sb.removeChannel(channel); channel = null;
   S.me = null; clearForms();
@@ -1251,8 +1293,9 @@ $("loginForm").addEventListener("submit", async e => {
     const lk = await sb.rpc("login_check", { p_email: email });
     if (!lk.error && lk.data === true) { denyAccess(); return; }
     S.justSignedIn = true;
+    $("loginPass").value = "";
     const { error } = await sb.auth.signInWithPassword({ email, password: pass });
-    if (!error) return; // showApp runs from the sign-in event
+    if (!error) { $("loginEmail").value = ""; return; } // showApp runs from the sign-in event
     S.justSignedIn = false;
     if (error.message !== "Invalid login credentials") { $("loginErr").textContent = error.message; return; }
     // wrong password: count it for this email (database) and for this device
@@ -1264,7 +1307,7 @@ $("loginForm").addEventListener("submit", async e => {
     $("loginErr").textContent = `Email or password is wrong. ${left} attempt${left === 1 ? "" : "s"} left.`;
   } finally { $("loginBtn").disabled = false; }
 });
-$("signOut").onclick = async () => { clearTimeout(draftTimer); saveDraftNow(); clearInterval(idleTimer); if (channel) sb.removeChannel(channel); channel = null; S.me = null; clearForms(); lsDel(LS.active); await sb.auth.signOut(); };
+$("signOut").onclick = async () => { clearTimeout(draftTimer); saveDraftNow(); await flushCash(); saveDraftNow(); clearInterval(idleTimer); if (channel) sb.removeChannel(channel); channel = null; S.me = null; clearForms(); lsDel(LS.active); await sb.auth.signOut(); };
 
 /* ---- admin: locked logins ---- */
 async function loadLocked() {
@@ -1282,6 +1325,18 @@ $("lockedList").addEventListener("click", async e => {
   if (r.error || !r.data) { b.disabled = false; showBanner("Could not unlock: " + ((r.error && r.error.message) || "not allowed")); return; }
   loadLocked();
 });
+
+// Name in the browser tab and at the top: neutral, set APP_TITLE in config.js to change it.
+(function setTitle() {
+  const t = ((window.APP_CONFIG || {}).APP_TITLE || "Workspace").trim() || "Workspace";
+  document.title = t; const h = document.getElementById("appTitle"); if (h) h.textContent = t;
+})();
+// Browsers that can't show dots on a normal text box get a password box that asks not to be saved.
+(function passwordBox() {
+  const p = document.getElementById("loginPass");
+  const ok = window.CSS && CSS.supports && (CSS.supports("-webkit-text-security", "disc") || CSS.supports("text-security", "disc"));
+  if (!ok) { p.type = "password"; p.setAttribute("autocomplete", "new-password"); }
+})();
 
 async function init() {
   try { const b = localStorage.getItem("dsb-branch"); if (b && (b === "all" || DEFAULT_BRANCHES.some(x => x.id === b))) S.branch = b; } catch (_) {}
