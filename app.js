@@ -1300,7 +1300,10 @@ $("loginForm").addEventListener("submit", async e => {
     if (error.message !== "Invalid login credentials") { $("loginErr").textContent = error.message; return; }
     // wrong password: count it for this email (database) and for this device
     const r = await sb.rpc("login_failed", { p_email: email });
-    const devFails = Number(lsGet(LS.fails) || 0) + 1; lsSet(LS.fails, String(devFails));
+    // device count is per day too: a new day starts again at 0
+    let dev = {}; try { dev = JSON.parse(lsGet(LS.fails) || "{}") || {}; } catch (_) { dev = {}; }
+    const devFails = (dev.d === todayISO() ? num(dev.n) : 0) + 1;
+    lsSet(LS.fails, JSON.stringify({ d: todayISO(), n: devFails }));
     const left = Math.min(r.error ? 3 : num(r.data), 3 - devFails);
     if (left <= 0) { lsDel(LS.fails); denyAccess(); return; }
     $("loginPass").value = ""; $("loginPass").focus();
