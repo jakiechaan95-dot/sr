@@ -295,3 +295,6 @@ tr.hlpick .sw{vertical-align:middle;margin-right:4px}
 /* restored draft note */
 .draftnote{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 12px;border-radius:8px;background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn);font-size:13px;font-weight:500}
 .draftnote .linkbtn{color:var(--warn);text-decoration:underline}
+
+/* password shown as dots without being a browser "password" field */
+.maskpw{-webkit-text-security:disc;text-security:disc;font-family:var(--f-body);letter-spacing:.08em}
