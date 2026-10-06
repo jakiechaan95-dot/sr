@@ -213,6 +213,18 @@ Install: run `supabase/update_all_v12.sql` (safe to re-run), then replace `index
 
 Install: replace `index.html`, `styles.css` and `app.js`. No SQL needed.
 
+## Update 14: neutral name, no saved passwords, drafts for everything
+
+- The browser tab and the top of the app show **Workspace** instead of the old name. To use another word, add
+  `APP_TITLE: "Your word"` inside `config.js`.
+- The password box shows dots but is not a browser "password field", so Chrome/Safari/Edge don't offer
+  "Save password?" or fill it in. Email is not remembered either. Both boxes are emptied after signing in.
+- Drafts now cover **everything** typed on the day page: bills, income, expenses, yesterday cash, notes and the
+  note count. Cash fields still save themselves; anything not yet saved (e.g. no internet) is kept as a draft,
+  pushed to the database at sign-out if possible, and saved automatically after the next sign-in.
+
+Install: replace `index.html`, `styles.css` and `app.js`. No SQL needed. Keep your own `config.js`.
+
 ## Changing payment types later
 
 Payment types are listed at the top of `app.js` (`PAY`) and as columns in the `sales` table. To add one (for example "BOC"):
