@@ -225,6 +225,14 @@ Install: replace `index.html`, `styles.css` and `app.js`. No SQL needed.
 
 Install: replace `index.html`, `styles.css` and `app.js`. No SQL needed. Keep your own `config.js`.
 
+## Update 15: 3 wrong passwords per day
+
+- Wrong passwords are counted **per day** (Sri Lanka time): 3 wrong on the same day = locked. A new day starts at 0.
+- Counted per login (in the database, from any device) and per device (any email). A correct sign-in resets both.
+- A locked staff login stays locked (also the next day) until admin unlocks it; an admin login unlocks after 30 minutes.
+
+Install: run `supabase/update_all_v13.sql` (safe to re-run), then replace `app.js`.
+
 ## Changing payment types later
 
 Payment types are listed at the top of `app.js` (`PAY`) and as columns in the `sales` table. To add one (for example "BOC"):
