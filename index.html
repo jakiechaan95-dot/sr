@@ -7,6 +7,7 @@
 <title>Daily Sales Book</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -14,14 +15,17 @@
 
 <!-- ===== Login ===== -->
 <div class="app" id="loginView" hidden>
-  <form class="panel login" id="loginForm">
-    <h1>Daily Sales Book</h1>
-    <p>Sign in with the staff account your manager created for you.</p>
+  <form class="panel login" id="loginForm" autocomplete="on">
     <label class="f">Email<input type="email" id="loginEmail" autocomplete="username" required></label>
     <label class="f">Password<input type="password" id="loginPass" autocomplete="current-password" required></label>
     <button class="primary" type="submit" id="loginBtn">Sign in</button>
-    <span class="err" id="loginErr"></span>
+    <span class="err" id="loginErr" role="alert"></span>
   </form>
+</div>
+
+<!-- ===== Access denied ===== -->
+<div class="app" id="deniedView" hidden>
+  <div class="panel login denied"><strong>Access denied</strong></div>
 </div>
 
 <!-- ===== App ===== -->
@@ -52,6 +56,10 @@
       <div class="setrow"><label class="f">Branch 3 name<input id="bn_b3" maxlength="40"></label><label class="f">Address<input id="ba_b3" maxlength="120"></label></div>
       <div class="formfoot"><span></span><div class="actions"><button class="ghost" type="button" id="settingsClose">Close</button><button class="primary" type="submit">Save</button></div></div>
     </form>
+    <div class="locked">
+      <div class="panel-head"><h3>Locked logins</h3><span class="meta">Locked after 3 wrong passwords</span></div>
+      <div id="lockedList" class="msg">–</div>
+    </div>
   </section>
 
   <!-- single branch: laid out like the daily sheet -->
@@ -62,6 +70,7 @@
     <section class="panel" id="billPanel">
       <div class="panel-head"><h2 id="billTitle">New bill</h2><span class="meta">Add each phone or accessory as its own line, with how that line was paid</span></div>
       <form class="entry" id="saleForm" autocomplete="off">
+        <div class="draftnote" id="billDraft" hidden></div>
         <div class="fields">
           <label class="f">Bill no.<input id="sRef" maxlength="40" placeholder="e.g. 1804"></label>
           <label class="f">Customer name<input id="sDesc" maxlength="80" placeholder="Optional"></label>
@@ -155,7 +164,6 @@
 
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
