@@ -179,6 +179,40 @@ Install: run `supabase/update_all_v9.sql` (safe to re-run), then replace `styles
 
 Install: run `supabase/update_all_v10.sql` (safe to re-run), then replace `app.js` and `styles.css`.
 
+## Update 11: faster
+
+- A whole day loads in **one** request instead of 7 (database function `get_day`).
+- After saving, the day reloads once (not twice).
+- The Excel library loads only when admin clicks a Download button.
+- `vercel.json` lets phones keep the app files for 5 minutes between visits.
+- Keep Supabase in **Mumbai** (closest to Sri Lanka). Vercel's location doesn't matter: it only serves the files.
+
+Install: run `supabase/update_all_v11.sql` (safe to re-run), then upload `index.html`, `app.js` and the new `vercel.json`.
+
+## Update 12: login security
+
+- Login page shows only Email, Password and Sign in.
+- **Signs out after 5 minutes without activity** (any tap or key press restarts the 5 minutes; a warning shows
+  for the last 30 seconds). Closing the app and coming back more than 5 minutes later also needs a new sign-in.
+- **3 wrong passwords**: the page shows "Access denied" and leaves the website. That login is **locked in the
+  database** (it can't read or save anything, even with the right password) and that device is blocked for 30 minutes.
+- **Unlock**: admin → **Branches** → *Locked logins* → **Unlock**. An admin login unlocks itself after 30 minutes.
+  Or in SQL: `delete from public.login_guard where email = 'prime@idealz.lk';`
+
+Install: run `supabase/update_all_v12.sql` (safe to re-run), then replace `index.html`, `styles.css` and `app.js`.
+
+## Update 13: drafts
+
+- The bill form, income form and expense form save themselves as a **draft on the device** while you type.
+- After an automatic sign-out (or if the phone dies or the page closes), signing in again with the **same login**
+  brings the unsaved bill / entry back, with a yellow note *"Unsaved bill restored … Check it and save."* and a
+  **Discard** button.
+- The draft is removed when the bill is saved, cancelled or discarded, and after 3 days.
+- Drafts belong to one login and one branch: another login on the same phone sees nothing. Signing out clears the
+  screen.
+
+Install: replace `index.html`, `styles.css` and `app.js`. No SQL needed.
+
 ## Changing payment types later
 
 Payment types are listed at the top of `app.js` (`PAY`) and as columns in the `sales` table. To add one (for example "BOC"):
