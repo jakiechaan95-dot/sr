@@ -380,7 +380,7 @@ function renderBranch() {
         `<td class="dim z">${i + 1}</td>` +
         `<td data-label="Bill no.">${esc(bill.ref || "–")}</td>` +
         (cat === "phone" ? `<td data-label="IMEI"><span class="sn">${esc(it.serial)}</span></td>` : "") +
-        `<td class="title">${it.qty > 1 ? fmt(it.qty).replace(/\.00$/, "") + " × " : ""}${esc(it.item)}</td>` +
+        `<td class="title">${it.qty > 1 ? fmt(it.qty).replace(/\.00$/, "") + " × " : ""}${esc(it.item)}${cat !== "phone" && it.serial ? ` <span class="sn">SN ${esc(it.serial)}</span>` : ""}</td>` +
         `<td data-label="Sales rep" class="rep ${it.sales_rep || it.highlight ? "" : "z"}">${esc(it.sales_rep)}${it.highlight ? `<span class="hltag">${hlName(it.highlight)}</span>` : ""}</td>` +
         payCells(it.pay) +
         `<td data-label="Remarks" class="small full ${rem ? "" : "z"}">${rem}</td>` +
@@ -512,7 +512,8 @@ function addLine(cat, it) {
   row.innerHTML = `
     <div class="ir-top">
       <div class="it-type"><span class="catpill">${isPhone ? "Phone" : "Accessory"}</span><button type="button" class="iconbtn i-del" aria-label="Remove line" title="Remove line">×</button></div>
-      ${isPhone ? `<label class="f it-serial">IMEI<input class="i-serial" maxlength="60" inputmode="numeric" placeholder="15-digit IMEI"></label>` : ""}
+      ${isPhone ? `<label class="f it-serial">IMEI<input class="i-serial" maxlength="60" inputmode="numeric" placeholder="15-digit IMEI"></label>`
+                : `<label class="f it-serial">Serial no. (if any)<input class="i-serial" maxlength="60" autocapitalize="characters" placeholder="Leave empty if none"></label>`}
       <label class="f it-desc">Description<input class="i-name" maxlength="120" placeholder="${isPhone ? "e.g. Apple iPhone 17 Pro 256GB - Silver" : "e.g. Apple 40W adapter"}"></label>
       <label class="f">Qty<input class="i-qty" type="number" min="1" step="1" inputmode="numeric"></label>
       <label class="f">Sales rep<input class="i-rep" maxlength="40" list="repList" placeholder="Name" autocapitalize="characters"></label>
@@ -526,7 +527,7 @@ function addLine(cat, it) {
       ${PAY.map(p => `<label class="f"><span class="payname p-${p.k}">${p.n}</span><input class="i-pay" data-k="${p.k}" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0.00"></label>`).join("")}
       <div class="it-line"><span>Line total</span><strong class="i-line">0.00</strong></div>
     </div>`;
-  if (isPhone) row.querySelector(".i-serial").value = it.serial || "";
+  row.querySelector(".i-serial").value = it.serial || "";
   row.querySelector(".i-name").value = it.item || "";
   row.querySelector(".i-qty").value = it.qty || 1;
   row.querySelector(".i-rep").value = it.sales_rep || "";
@@ -543,7 +544,8 @@ function setHl(row, k) {
 }
 function syncLine(row) {
   const q = row.querySelector(".i-qty");
-  if (row.dataset.cat === "phone") { q.value = 1; q.disabled = true; }
+  // phones, and accessories with a serial, are one item per line
+  if (row.dataset.cat === "phone" || row.querySelector(".i-serial").value.trim()) { q.value = 1; q.disabled = true; } else q.disabled = false;
   let t = 0; row.querySelectorAll(".i-pay").forEach(i => t += num(i.value));
   row.querySelector(".i-line").textContent = fmt(t);
 }
@@ -552,8 +554,8 @@ function readLines() {
   $("itemRows").querySelectorAll(".itemrow").forEach((row, i) => {
     const cat = row.dataset.cat;
     const item = row.querySelector(".i-name").value.trim();
-    const serial = cat === "phone" ? row.querySelector(".i-serial").value.trim() : "";
-    const qty = cat === "phone" ? 1 : Math.max(1, Math.round(num(row.querySelector(".i-qty").value)) || 1);
+    const serial = row.querySelector(".i-serial").value.trim();
+    const qty = cat === "phone" || serial ? 1 : Math.max(1, Math.round(num(row.querySelector(".i-qty").value)) || 1);
     const rep = row.querySelector(".i-rep").value.trim().toUpperCase();
     const war = Number(row.querySelector(".i-war").value) || 0;
     const pay = {}; row.querySelectorAll(".i-pay").forEach(inp => pay[inp.dataset.k] = r2(num(inp.value)));
@@ -739,7 +741,7 @@ function grabBill() {
   $("itemRows").querySelectorAll(".itemrow").forEach(row => {
     const pay = {}; row.querySelectorAll(".i-pay").forEach(i => { if (i.value !== "") pay[i.dataset.k] = i.value; });
     f.lines.push({ category: row.dataset.cat, item: row.querySelector(".i-name").value,
-      serial: row.dataset.cat === "phone" ? row.querySelector(".i-serial").value : "",
+      serial: row.querySelector(".i-serial").value,
       qty: row.querySelector(".i-qty").value, sales_rep: row.querySelector(".i-rep").value,
       warranty_days: Number(row.querySelector(".i-war").value) || 0, highlight: row.dataset.hl || "", pay });
   });
@@ -1001,7 +1003,7 @@ function daySheetRows(branchId, date, d) {
   A[r][lastCol - 1] = { v: dayName(date).toUpperCase(), s: st.dow };
   r = push([{ v: (baddr(branchId) || "").toUpperCase(), s: st.sub }]); M.push({ s: { r, c: 0 }, e: { r, c: lastCol - 2 } });
   r = push([{ v: date, s: st.date }]); M.push({ s: { r, c: 0 }, e: { r, c: lastCol - 2 } });
-  const head = () => push([{ v: "No", s: st.head }, { v: "BILL NO.", s: st.head }, { v: "IMEI", s: st.head }, { v: "DESCRIPTION", s: st.head }, { v: "SALES REP", s: st.head },
+  const head = () => push([{ v: "No", s: st.head }, { v: "BILL NO.", s: st.head }, { v: "IMEI / SERIAL", s: st.head }, { v: "DESCRIPTION", s: st.head }, { v: "SALES REP", s: st.head },
     ...PAY.map(p => payHead(p.k)), { v: "TOTAL", s: st.head }, { v: "REMARKS", s: st.head }]);
   const section = (label) => { const rr = push([{ v: label, s: st.sect }]); for (let k = 1; k <= lastCol; k++) A[rr][k] = { v: "", s: st.sect }; M.push({ s: { r: rr, c: 0 }, e: { r: rr, c: lastCol } }); };
   const lineRows = (cat) => {
@@ -1129,7 +1131,7 @@ $("exRange").onclick = async () => {
   const list = Object.values(map).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.branch < b.branch ? -1 : 1);
   const H = arr => arr.map(v => ({ v, s: st.head }));
   const sum = [H(["Date", "Branch", "Phones", "Accessories", ...PAY.map(p => p.n), "Total sales", "Card transactions", "Other income", "Expenses", "Net sales", "Cash in hand", "Counted", "Difference"])];
-  const lines = [H(["Date", "Branch", "Bill no.", "Type", "IMEI", "Description", "Qty", "Sales rep", "Highlight", ...PAY.map(p => p.n), "Total", "Warranty", "Warranty until", "Customer", "Phone"])];
+  const lines = [H(["Date", "Branch", "Bill no.", "Type", "IMEI / Serial", "Description", "Qty", "Sales rep", "Highlight", ...PAY.map(p => p.n), "Total", "Warranty", "Warranty until", "Customer", "Phone"])];
   const inc = [H(["Date", "Branch", "Description", "Received by", "Amount", "Breakdown"])], exp = [H(["Date", "Branch", "Description", "Paid by", "Amount", "Breakdown"])];
   const reps = {};
   list.forEach(d => {
