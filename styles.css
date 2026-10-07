@@ -172,7 +172,6 @@ table.ledger{width:100%;border-collapse:collapse;font-size:14px}
   .ir-top{grid-template-columns:minmax(0,1.3fr) minmax(0,2fr) 64px minmax(0,1fr) minmax(0,1fr)}
   .ir-top .it-type{grid-column:1/-1}
   .ir-top .it-desc,.ir-top .it-serial{grid-column:auto}
-  .itemrow[data-cat="accessory"] .ir-top{grid-template-columns:minmax(0,2.6fr) 64px minmax(0,1fr) minmax(0,1fr)}
   .ir-pay{grid-template-columns:repeat(7,minmax(0,1fr)) minmax(0,1.1fr)}
   .it-line strong{justify-content:flex-end}
 }
