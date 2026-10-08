@@ -6,6 +6,7 @@ const PAY = [
   { k: "cash", n: "Cash" },
   { k: "sampath", n: "Sampath" },
   { k: "amana", n: "Amana" },
+  { k: "bank", n: "Bank" },
   { k: "seylan", n: "Seylan" },
   { k: "commercial", n: "Commercial" },
   { k: "amex", n: "Amex" },
@@ -27,7 +28,7 @@ const HIGHLIGHTS = [
 const hlName = k => (HIGHLIGHTS.find(h => h.k === k) || {}).n || "";
 const hlXl = k => (HIGHLIGHTS.find(h => h.k === k) || {}).xl || "";
 const EXPENSE_CHIPS = ["Transfer - Amana", "Transfer - Seylan", "Transfer - Sampath", "Boss", "Breakfast & lunch", "PickMe", "Transport", "Delivery", "Salary", "Shop bike fuel"];
-const XL_COLORS = { cash: "000000", sampath: "E46C1E", amana: "1F9488", seylan: "D42A2A", commercial: "6A3D9E", amex: "1D2F6B", web: "0A6C8F" };
+const XL_COLORS = { cash: "000000", sampath: "E46C1E", amana: "1F9488", bank: "2E6DA4", seylan: "D42A2A", commercial: "6A3D9E", amex: "1D2F6B", web: "0A6C8F" };
 
 const S = {
   date: todayISO(), lastToday: todayISO(), branch: "b1", days: {}, prevClose: {}, me: null,
