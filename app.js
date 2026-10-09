@@ -13,6 +13,7 @@ const PAY = [
   { k: "web", n: "Web" }
 ];
 const CARD = PAY.filter(p => p.k !== "cash");
+const TALLY = PAY.filter(p => p.k === "bank"); // only Bank is checked against the bank statement
 const DEFAULT_BRANCHES = [{ id: "b1", name: "Branch 1", address: "" }, { id: "b2", name: "Branch 2", address: "" }, { id: "b3", name: "Branch 3", address: "" }];
 const TABLE = { sales: "sales", income: "other_income", expense: "expenses" };
 const WARRANTY = [
@@ -58,7 +59,7 @@ function payTotal(p) { return PAY.reduce((a, x) => a + num(p && p[x.k]), 0); }
 function zeroPay() { return Object.fromEntries(PAY.map(p => [p.k, 0])); }
 function setStatus(t) { $("status").textContent = t; }
 function showBanner(t) { const b = $("banner"); b.textContent = t || ""; b.hidden = !t; }
-function emptyDay(branch, date) { return { branch, date, opening: 0, banked: 0, counted: null, notes: "", denoms: {}, sales: {}, income: {}, expense: {} }; }
+function emptyDay(branch, date) { return { branch, date, opening: 0, banked: 0, counted: null, notes: "", denoms: {}, actuals: {}, sales: {}, income: {}, expense: {} }; }
 function isAdmin() { return !!(S.me && S.me.role === "admin"); }
 function canEdit() { return isAdmin() || S.date === todayISO(); }
 
@@ -125,7 +126,36 @@ function calc(d) {
   const counted = (d.counted === null || d.counted === undefined || d.counted === "") ? null : num(d.counted);
   return { sales, inc, exp, lines, pBy, aBy, sBy, iBy, eBy, totalSales, card, totalInc, totalExp, otherIncome, lessExp, net, adj,
     phones: sum(pBy), accs: sum(aBy), opening, banked, expected, counted, diff: counted == null ? null : r2(counted - expected),
-    notes: d.notes || "", denoms: d.denoms || {}, nonCash: card };
+    notes: d.notes || "", denoms: d.denoms || {}, nonCash: card, ...tallyOf(sBy, iBy, eBy, d.actuals || {}) };
+}
+// Bank & card tally, for ONE day only: expected = sales + income received - expenses paid by that type.
+function tallyOf(sBy, iBy, eBy, actuals) {
+  const rows = TALLY.map(p => {
+    const expected = r2(sBy[p.k] + iBy[p.k] - eBy[p.k]);
+    const a = actuals[p.k];
+    const actual = a === undefined || a === null || a === "" ? null : r2(num(a));
+    return { k: p.k, n: p.n, sales: sBy[p.k], income: iBy[p.k], exp: eBy[p.k], expected, actual, diff: actual == null ? null : r2(actual - expected) };
+  });
+  const used = rows.filter(r => Math.abs(r.expected) >= 0.005 || r.actual != null);
+  const off = used.filter(r => r.actual != null && Math.abs(r.diff) >= 0.005);
+  const open = used.filter(r => r.actual == null);
+  return { tally: rows, tallyUsed: used.length, tallyOff: off, tallyOpen: open.length };
+}
+function tallyText(c) {
+  if (!c.tallyUsed) return "";
+  if (c.tallyOff.length) { const r = c.tallyOff[0]; return r.diff < 0 ? `Short ${fmt(-r.diff)}` : `Excess ${fmt(r.diff)}`; }
+  return c.tallyOpen ? "Not checked" : "Tally";
+}
+function tallyPill(c) {
+  if (!c.tallyUsed) return '<span class="pill none">No bank today</span>';
+  if (c.tallyOff.length) return rowPill(c.tallyOff[0]);
+  if (c.tallyOpen) return '<span class="pill none">Not checked</span>';
+  return '<span class="pill ok">Tally</span>';
+}
+function rowPill(r) {
+  if (r.actual == null) return Math.abs(r.expected) < 0.005 ? "" : '<span class="pill none">Not checked</span>';
+  if (Math.abs(r.diff) < 0.005) return '<span class="pill ok">Tally</span>';
+  return r.diff < 0 ? `<span class="pill short">Short ${fmt(-r.diff)}</span>` : `<span class="pill over">Excess ${fmt(r.diff)}</span>`;
 }
 function diffPill(c) {
   if (c.counted == null) return '<span class="pill none">Not counted</span>';
@@ -137,7 +167,7 @@ function diffPill(c) {
 function buildDays(days, sales, inc, exp, items) {
   const o = {}, byId = {};
   const get = (b, dt) => o[b + "|" + dt] || (o[b + "|" + dt] = emptyDay(b, dt));
-  (days || []).forEach(r => Object.assign(get(r.branch_id, r.date), { opening: r.opening, banked: r.banked, counted: r.counted, notes: r.notes || "", denoms: r.denoms || {}, _row: true }));
+  (days || []).forEach(r => Object.assign(get(r.branch_id, r.date), { opening: r.opening, banked: r.banked, counted: r.counted, notes: r.notes || "", denoms: r.denoms || {}, actuals: r.actuals || {}, _row: true }));
   (sales || []).forEach(r => {
     byId[r.id] = get(r.branch_id, r.date).sales[r.id] = { id: r.id, t: Date.parse(r.created_at), ref: r.ref, desc: r.description, phone: r.customer_phone || "",
       remarks: r.remarks, items: [], pay: Object.fromEntries(PAY.map(p => [p.k, num(r[p.k])])) };
@@ -332,6 +362,7 @@ function renderDateLock() {
   ["incomeForm", "expenseForm"].forEach(id => { $(id).hidden = !can; });
   ["opening", "notes", "prevCount"].forEach(id => { $(id).disabled = !can; });
   document.querySelectorAll("#denomTable input").forEach(i => { i.disabled = !can; });
+  document.querySelectorAll("#tallyTable input").forEach(i => { i.disabled = !can; });
 }
 function render() {
   renderTabs();
@@ -431,6 +462,7 @@ function renderBranch() {
     : Math.abs(pc - c.opening) < 0.005 ? `Carried from yesterday's closing: ${fmt(pc)}.`
     : `Yesterday closed with ${fmt(pc)}, but today's yesterday-cash is ${fmt(c.opening)}. Press "Use yesterday's closing" if it should match.`;
   renderDenoms(c);
+  renderTally(c);
 }
 
 function renderIncome(c, can) {
@@ -460,6 +492,25 @@ function renderExpenses(c, can) {
   h += "</tbody>";
   if (c.exp.length || c.banked) h += `<tfoot><tr class="subtotal"><td class="title" colspan="3">Total expenses</td><td class="n total" data-label="Total">${fmt(c.lessExp)}</td><td class="z"></td></tr></tfoot>`;
   $("expenseTable").innerHTML = h;
+}
+function renderTally(c) {
+  $("tallyMeta").innerHTML = tallyPill(c);
+  const t = $("tallyTable"), can = canEdit();
+  if (!t.dataset.built) {
+    t.innerHTML = `<thead><tr><th></th><th class="n">Sales</th><th class="n">+ Income</th><th class="n">− Expenses</th><th class="n">Expected</th><th class="n">Actual</th><th>Result</th></tr></thead><tbody>` +
+      TALLY.map(p => `<tr data-k="${p.k}"><td class="title"><span class="payname p-${p.k}">${p.n}</span></td><td class="n" data-label="Sales" id="ts_${p.k}"></td><td class="n" data-label="+ Income" id="ti_${p.k}"></td><td class="n" data-label="− Expenses" id="te_${p.k}"></td>` +
+        `<td class="n" data-label="Expected"><strong id="tx_${p.k}"></strong></td><td class="n act-in" data-label="Actual"><input type="number" step="0.01" inputmode="decimal" id="ta_${p.k}" data-tk="${p.k}" placeholder="From statement" aria-label="Actual ${p.n} amount"></td><td data-label="Result" id="tr_${p.k}"></td></tr>`).join("") + `</tbody>`;
+    t.dataset.built = "1";
+  }
+  c.tally.forEach(r => {
+    $("ts_" + r.k).textContent = fmtz(r.sales); $("ti_" + r.k).textContent = fmtz(r.income); $("te_" + r.k).textContent = fmtz(r.exp);
+    $("tx_" + r.k).textContent = fmtz(r.expected);
+    const inp = $("ta_" + r.k);
+    if (document.activeElement !== inp) inp.value = r.actual == null ? "" : r.actual;
+    inp.disabled = !can;
+    $("tr_" + r.k).innerHTML = rowPill(r);
+    t.querySelector(`tr[data-k="${r.k}"]`).classList.toggle("zero", Math.abs(r.expected) < 0.005 && r.actual == null);
+  });
 }
 function renderDenoms(c) {
   const t = $("denomTable");
@@ -501,6 +552,7 @@ function renderAll() {
   h += row("<strong>Cash in hand</strong>", c => "<strong>" + fmt(c.expected) + "</strong>");
   h += row("Counted", c => c.counted == null ? "–" : fmt(c.counted));
   h += row("Difference", c => diffPill(c));
+  h += `<tr><td>Bank tally</td>${cs.map(x => `<td class="n">${tallyPill(x.c)}</td>`).join("")}<td class="n"></td></tr>`;
   $("allTable").innerHTML = h + "</tbody>";
 }
 
@@ -811,10 +863,11 @@ function restoreDrafts() {
         NOTES.forEach(n => { $("dn_" + n).value = c.denoms[n] || ""; });
         f.denoms = c.denoms; const t = NOTES.reduce((a, n) => a + n * num(c.denoms[n]), 0); f.counted = Object.keys(c.denoms).length ? t : null;
       }
+      if (c.actuals) { TALLY.forEach(p => { $("ta_" + p.k).value = c.actuals[p.k] ?? ""; }); f.actuals = c.actuals; }
       S.cashDirty = { ...c };
       if (Object.keys(f).length) saveCash(f).catch(() => {});
       const n = $("cashDraft"); n.hidden = false;
-      n.innerHTML = `<span>Unsaved cash entries restored and saved (${["opening" in c ? "yesterday cash" : "", "notes" in c ? "notes" : "", c.denoms ? "note count" : ""].filter(Boolean).join(", ")}).</span><button type="button" class="linkbtn" data-hide-note="1">OK</button>`;
+      n.innerHTML = `<span>Unsaved cash entries restored and saved (${["opening" in c ? "yesterday cash" : "", "notes" in c ? "notes" : "", c.denoms ? "note count" : "", c.actuals ? "bank actual" : ""].filter(Boolean).join(", ")}).</span><button type="button" class="linkbtn" data-hide-note="1">OK</button>`;
     } else if (d.cash) { d.cash = null; writeDraft(d); }
   } finally { S.restoring = false; }
 }
@@ -861,7 +914,24 @@ $("opening").addEventListener("input", () => { if (canEdit() && S.branch !== "al
 $("notes").addEventListener("input", () => { if (canEdit() && S.branch !== "all") { S.cashDirty.notes = $("notes").value.trim(); saveDraftSoon(); } });
 $("opening").addEventListener("change", () => { if (S.branch !== "all" && canEdit()) saveCash({ opening: r2(num($("opening").value)) }).catch(() => {}); });
 $("notes").addEventListener("change", () => { if (S.branch !== "all" && canEdit()) saveCash({ notes: $("notes").value.trim() }).catch(() => {}); });
-let denomTimer = null;
+let denomTimer = null, tallyTimer = null;
+function readActuals() {
+  const a = {};
+  TALLY.forEach(p => { const v = $("ta_" + p.k).value.trim(); if (v !== "") a[p.k] = r2(num(v)); });
+  return a;
+}
+$("tallyTable").addEventListener("input", e => {
+  if (!e.target.closest("input[data-tk]") || !canEdit() || S.branch === "all") return;
+  const a = readActuals();
+  S.cashDirty.actuals = a; saveDraftSoon();
+  // live result while typing
+  const d = S.days[S.branch] || emptyDay(S.branch, S.date);
+  const c = calc({ ...d, actuals: a });
+  c.tally.forEach(r => { $("tr_" + r.k).innerHTML = rowPill(r); });
+  $("tallyMeta").innerHTML = tallyPill(c);
+  clearTimeout(tallyTimer);
+  tallyTimer = setTimeout(() => { tallyTimer = null; saveCash({ actuals: a }).catch(() => {}); }, 700);
+});
 $("denomTable").addEventListener("input", e => {
   const inp = e.target.closest("input[data-note]"); if (!inp || !canEdit()) return;
   // live total while typing, save after a short pause
@@ -1071,6 +1141,13 @@ function daySheetRows(branchId, date, d) {
   });
   setCell(sumStart + 1 + NOTES.length, cc + 1, { v: "TOTAL", s: st.totL });
   setCell(sumStart + 1 + NOTES.length, cc + 2, N(tot, st.grand));
+  // bank & card tally (this day only)
+  push([]);
+  const tr = push([{ v: "BANK TALLY (this day only)", s: st.sect }]); for (let k = 1; k <= 9; k++) A[tr][k] = { v: "", s: st.sect }; M.push({ s: { r: tr, c: 0 }, e: { r: tr, c: 9 } });
+  push(["", "", "", { v: "", s: st.head }, { v: "SALES", s: st.head }, { v: "+ INCOME", s: st.head }, { v: "- EXPENSES", s: st.head }, { v: "EXPECTED", s: st.head }, { v: "ACTUAL", s: st.head }, { v: "DIFFERENCE", s: st.head }]);
+  c.tally.forEach(r => push(["", "", "", { v: r.n.toUpperCase(), s: { ...st.cell, font: { bold: true, color: { rgb: XL_COLORS[r.k] || "000000" } } } }, N(r.sales), N(r.income), N(r.exp), N(r.expected, st.tot),
+    r.actual == null ? { v: Math.abs(r.expected) < 0.005 ? "" : "Not checked", s: st.cell } : N(r.actual),
+    r.diff == null ? { v: "", s: st.cell } : N(r.diff, { ...st.num, font: { bold: true, color: { rgb: Math.abs(r.diff) < 0.005 ? "1B6A45" : "C00000" } } })]));
   if (c.notes) { push([]); push(["", "", "", { v: "NOTES: " + c.notes, s: { font: { italic: true } } }]); }
 
   return makeSheet(A, [5, 10, 18, 44, 16, ...PAY.map(() => 13), 14, 34], M);
@@ -1085,7 +1162,7 @@ function allSheet(date, days) {
   PAY.forEach(p => add(p.n, c => c.sBy[p.k]));
   add("TOTAL SALES", c => c.totalSales, true); add("Card transactions", c => c.card);
   add("Other income (incl. yesterday cash)", c => c.otherIncome); add("Expenses", c => c.lessExp); add("Net sales", c => c.net, true);
-  add("CASH IN HAND", c => c.expected, true); add("Counted", c => c.counted == null ? "Not counted" : c.counted); add("Difference", c => c.diff == null ? "" : c.diff);
+  add("CASH IN HAND", c => c.expected, true); add("Counted", c => c.counted == null ? "Not counted" : c.counted); add("Difference", c => c.diff == null ? "" : c.diff); add("Bank tally", c => tallyText(c) || "-");
   return makeSheet(A, [36, 16, 16, 16, 18], [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 4 } }]);
 }
 function saveWb(wb, filename) {
@@ -1131,13 +1208,13 @@ $("exRange").onclick = async () => {
   let map; try { map = await loadRange(from, to); } catch (e) { $("exMsg").textContent = "Could not read entries: " + (e.message || e); return; }
   const list = Object.values(map).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.branch < b.branch ? -1 : 1);
   const H = arr => arr.map(v => ({ v, s: st.head }));
-  const sum = [H(["Date", "Branch", "Phones", "Accessories", ...PAY.map(p => p.n), "Total sales", "Card transactions", "Other income", "Expenses", "Net sales", "Cash in hand", "Counted", "Difference"])];
+  const sum = [H(["Date", "Branch", "Phones", "Accessories", ...PAY.map(p => p.n), "Total sales", "Card transactions", "Other income", "Expenses", "Net sales", "Cash in hand", "Counted", "Difference", "Bank tally"])];
   const lines = [H(["Date", "Branch", "Bill no.", "Type", "IMEI / Serial", "Description", "Qty", "Sales rep", "Highlight", ...PAY.map(p => p.n), "Total", "Warranty", "Warranty until", "Customer", "Phone"])];
   const inc = [H(["Date", "Branch", "Description", "Received by", "Amount", "Breakdown"])], exp = [H(["Date", "Branch", "Description", "Paid by", "Amount", "Breakdown"])];
   const reps = {};
   list.forEach(d => {
     const c = calc(d), bn = bname(d.branch);
-    sum.push([d.date, bn, N(c.phones), N(c.accs), ...PAY.map(p => N(c.sBy[p.k])), N(c.totalSales), N(c.card), N(c.otherIncome), N(c.lessExp), N(c.net), N(c.expected), c.counted == null ? "" : N(c.counted), c.diff == null ? "" : N(c.diff)]);
+    sum.push([d.date, bn, N(c.phones), N(c.accs), ...PAY.map(p => N(c.sBy[p.k])), N(c.totalSales), N(c.card), N(c.otherIncome), N(c.lessExp), N(c.net), N(c.expected), c.counted == null ? "" : N(c.counted), c.diff == null ? "" : N(c.diff), tallyText(c)]);
     c.lines.forEach(({ bill, it }) => {
       lines.push([d.date, bn, bill.ref || "", it.category === "phone" ? "Phone" : "Accessory", it.serial || "", it.item, { v: it.qty, int: true }, it.sales_rep || "",
         it.highlight ? { v: hlName(it.highlight), s: { fill: { fgColor: { rgb: hlXl(it.highlight) } } } } : "",
@@ -1197,6 +1274,7 @@ function clearForms() {
     ["billDraft", "incomeDraft", "expenseDraft", "cashDraft"].forEach(id => { $(id).hidden = true; });
     ["opening", "notes", "lookupQ"].forEach(id => { $(id).value = ""; });
     NOTES.forEach(n => { const i = document.getElementById("dn_" + n); if (i) i.value = ""; });
+    TALLY.forEach(p => { const i = document.getElementById("ta_" + p.k); if (i) i.value = ""; });
     S.cashDirty = {};
     $("lookupWrap").hidden = true; $("lookupMsg").textContent = "";
     S.days = {}; S.uid = null;
@@ -1236,6 +1314,8 @@ async function flushCash() {
   const d = S.cashDirty, f = {};
   if ("opening" in d) f.opening = d.opening;
   if ("notes" in d) f.notes = d.notes;
+  if ("actuals" in d) f.actuals = d.actuals;
+  clearTimeout(tallyTimer); tallyTimer = null;
   if ("denoms" in d) { f.denoms = d.denoms; const t = NOTES.reduce((a, n) => a + n * num(d.denoms[n]), 0); f.counted = Object.keys(d.denoms).length ? t : null; }
   clearTimeout(denomTimer); denomTimer = null;
   if (!Object.keys(f).length) return;
