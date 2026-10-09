@@ -233,6 +233,39 @@ Install: replace `index.html`, `styles.css` and `app.js`. No SQL needed. Keep yo
 
 Install: run `supabase/update_all_v13.sql` (safe to re-run), then replace `app.js`.
 
+## Update 16: serial numbers on accessories
+
+- Every **Accessory** line has an optional **Serial no. (if any)** box. Empty = any quantity. Filled = quantity 1
+  (one line per serialed item, e.g. 2 AirPods = 2 lines).
+- Accessory serials get the same "already sold" warning and warranty lookup as phone IMEIs, show next to the item
+  name in the Accessories table, and appear in the Excel "IMEI / SERIAL" column.
+
+Install: replace `app.js` and `styles.css`. No SQL needed.
+
+## Update 17: payment type Bank
+
+- New payment type **Bank**, shown right after Amana: on every bill line, in the Phones / Accessories / Total sales
+  tables, in "Received by" / "Paid by" for income and expenses, and in every Excel report.
+
+Install: run `supabase/update_all_v14.sql` (safe to re-run), then replace `app.js` and `styles.css`.
+
+## Update 18: Bank & card tally
+
+- New section **Bank & card tally** under the cash count. For each bank / card type (Sampath, Amana, Bank, Seylan,
+  Commercial, Amex, Web): Expected = sales + income received − expenses paid by that type, **for that day only**.
+- Type the **Actual** from the card machine settlement or the bank statement → Tally / Short / Excess per row and
+  an overall status (All tally / n not tallied / n not checked). Saves by itself, kept as a draft like the cash count.
+- Only **cash** carries to the next day; bank and card amounts never do.
+- Shown in All branches, in the Excel day sheet (its own table) and in the date-range Daily Summary (status column).
+- Fix: re-running the all-in-one SQL no longer fails once a Bank income/expense exists.
+
+Install: run `supabase/update_all_v15.sql` (safe to re-run), then replace `index.html`, `styles.css` and `app.js`.
+
+## Update 19: Bank tally only
+
+- The tally section is now **Bank tally** and checks only the **Bank** payment type (Sampath, Amana, Seylan,
+  Commercial, Amex and Web are no longer listed there). Everything else works as in update 18. No SQL needed.
+
 ## Changing payment types later
 
 Payment types are listed at the top of `app.js` (`PAY`) and as columns in the `sales` table. To add one (for example "BOC"):
