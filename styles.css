@@ -303,3 +303,47 @@ tr.hlpick .sw{vertical-align:middle;margin-right:4px}
 table.tally input{width:100%;max-width:140px;height:36px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
 table.tally tr.zero td{color:var(--muted)}
 @media (max-width:720px){table.ledger.cards.tally td.act-in{grid-column:1/-1}}
+
+/* ===== phone layout fixes ===== */
+.totals-narrow{display:none}
+@media (max-width:720px){
+  /* never let a table push the whole page sideways: it scrolls inside its own box */
+  .tablewrap{overflow-x:auto}
+  /* Total sales: compact one-row-per-payment table instead of 10 columns */
+  .totals-wide{display:none}
+  .totals-narrow{display:block}
+  #totalsMobile{font-size:13px}
+  #totalsMobile td,#totalsMobile th{padding:8px 4px}
+  #totalsMobile td:first-child,#totalsMobile th:first-child{padding-left:8px}
+  #totalsMobile td:last-child,#totalsMobile th:last-child{padding-right:8px}
+  #totalsMobile tr.grand td{font-size:13px}
+  #totalsMobile th.n,#totalsMobile td.n{min-width:0}
+  /* 16px text in boxes stops iPhone zooming in every time a box is tapped */
+  label.f input,label.f select,label.f textarea,.calcbox .calc-in,table.denoms input,table.tally input,.datebar input,.brkrow input{font-size:16px}
+  /* easier to read */
+  label.f,.it-line,.it-hl{font-size:13px}
+  .kpi .lbl{font-size:12px}
+  .panel{padding:14px}
+  /* bill header: two boxes per row */
+  #saleForm .fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+  /* bill total and Save button stay in view while typing a long bill */
+  #saleForm > .formfoot{position:sticky;bottom:0;z-index:5;margin:0 -12px -12px;padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));background:var(--surface-2);border-top:1px solid var(--line);border-radius:0 0 8px 8px;box-shadow:0 -6px 14px rgba(0,0,0,.06)}
+  /* admin branch tabs wrap instead of hiding "Branches" off screen */
+  .branches{flex-wrap:wrap}
+  /* sheet header: shop left, day right, on one line */
+  .sheethead{padding:12px 14px;flex-wrap:nowrap;align-items:center}
+  .sheethead .shop strong{font-size:1.1rem}
+  .sheethead .shop span{font-size:12px}
+}
+/* finger-sized buttons on touch screens (at least ~40px tall) */
+@media (pointer:coarse),(max-width:720px){
+  .small{height:40px;padding:0 12px;font-size:14px}
+  .ledger .linkbtn{min-height:40px;padding:8px 10px;font-size:14px}
+  .chip{min-height:38px;padding:6px 12px;font-size:14px}
+  .sw{width:38px;height:38px}
+  .sw.sw-none{width:auto;padding:0 12px}
+  .opbtn{width:44px;height:44px}
+  .calcbox .calc-in,label.f input,label.f select{height:44px}
+  table.denoms input,table.tally input{height:42px}
+  .primary,.ghost{min-height:44px}
+}
