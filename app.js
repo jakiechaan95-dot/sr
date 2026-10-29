@@ -373,6 +373,9 @@ function render() {
   $("exRange").closest(".exportcard").hidden = !admin;
   ["prevDay", "nextDay", "todayBtn"].forEach(id => { $(id).hidden = !admin; });
   $("date").disabled = !admin;
+  // staff: one branch, today only, so the date box and the single branch tab are just noise
+  document.querySelector(".datebar").hidden = !admin;
+  $("branchTabs").hidden = !admin;
   if (!admin) $("settingsPanel").hidden = true;
   $("date").value = S.date;
   const all = S.branch === "all";
@@ -425,7 +428,7 @@ function renderBranch() {
       }
     });
     h += "</tbody>";
-    if (list.length) h += `<tfoot><tr class="subtotal"><td class="title" colspan="${cat === "phone" ? 5 : 4}">Total ${label}</td>${PAY.map(p => `<td class="n" data-label="${p.n}">${fmtz(by[p.k])}</td>`).join("")}<td class="n total" data-label="Total"><strong>${fmt(tot)}</strong></td><td class="z"></td></tr></tfoot>`;
+    if (list.length) h += `<tfoot><tr class="subtotal"><td class="title" colspan="${cat === "phone" ? 5 : 4}">Total ${label}</td>${PAY.map(p => `<td class="n ${Math.abs(by[p.k]) < 0.005 ? "z" : ""}" data-label="${p.n}">${fmtz(by[p.k])}</td>`).join("")}<td class="n total" data-label="Total"><strong>${fmt(tot)}</strong></td><td class="z"></td></tr></tfoot>`;
     $(tableId).innerHTML = h;
   };
   sec("phone", "phonesTable", "phonesMeta", "phones");
@@ -437,6 +440,14 @@ function renderBranch() {
     `<tr><td>Accessories</td>${PAY.map(p => `<td class="n">${fmtz(c.aBy[p.k])}</td>`).join("")}<td class="n">${fmt(c.accs)}</td></tr>` +
     `<tr class="subtotal"><td>Total card transactions</td><td class="n">–</td>${CARD.map(p => `<td class="n">${fmtz(c.sBy[p.k])}</td>`).join("")}<td class="n">${fmt(c.card)}</td></tr>` +
     `<tr class="grand"><td>Total sales</td>${PAY.map(p => `<td class="n">${fmtz(c.sBy[p.k])}</td>`).join("")}<td class="n">${fmt(c.totalSales)}</td></tr></tbody>`;
+  // phone version: one row per payment type that was used (fits a narrow screen)
+  const used = PAY.filter(p => Math.abs(c.pBy[p.k]) >= 0.005 || Math.abs(c.aBy[p.k]) >= 0.005 || Math.abs(c.sBy[p.k]) >= 0.005);
+  const fs = v => Math.abs(v) < 0.005 ? "–" : (Math.abs(v - Math.round(v)) < 0.005 ? Math.round(v).toLocaleString("en-LK") : fmt(v));
+  $("totalsMobile").innerHTML = `<thead><tr><th>Paid by</th><th class="n">Phones</th><th class="n">Acc.</th><th class="n">Total</th></tr></thead><tbody>` +
+    (used.length ? used.map(p => `<tr><td class="payname p-${p.k}">${p.n}</td><td class="n">${fs(c.pBy[p.k])}</td><td class="n">${fs(c.aBy[p.k])}</td><td class="n">${fs(c.sBy[p.k])}</td></tr>`).join("")
+      : `<tr><td class="empty" colspan="4">No sales today.</td></tr>`) +
+    `</tbody><tfoot><tr><td>Card transactions</td><td></td><td></td><td class="n">${fs(c.card)}</td></tr>` +
+    `<tr class="grand"><td>Total sales</td><td class="n">${fs(c.phones)}</td><td class="n">${fs(c.accs)}</td><td class="n">${fs(c.totalSales)}</td></tr></tfoot>`;
 
   renderIncome(c, can);
   renderExpenses(c, can);
@@ -1251,15 +1262,33 @@ const lsGet = k => { try { return localStorage.getItem(k); } catch (_) { return 
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
 const lsDel = k => { try { localStorage.removeItem(k); } catch (_) {} };
 
-function denyAccess() {
-  // 3 wrong passwords: block this device, then leave the website
-  lsSet(LS.denied, String(Date.now() + DEVICE_LOCK_MS));
+function deniedInfo() {
+  const raw = lsGet(LS.denied) || "";
+  try { const o = JSON.parse(raw); if (o && typeof o === "object") return { u: num(o.u), e: String(o.e || "") }; } catch (_) {}
+  return { u: Number(raw) || 0, e: "" }; // older format: just the time
+}
+function denyAccess(email) {
+  // 3 wrong passwords: block this device, then leave the website.
+  // The email is kept so an admin "Unlock" also frees this device.
+  const old = deniedInfo();
+  const e = (email || (old.u > Date.now() ? old.e : "") || "").trim().toLowerCase();
+  lsSet(LS.denied, JSON.stringify({ u: Date.now() + DEVICE_LOCK_MS, e }));
   if (sb) sb.auth.signOut().catch(() => {});
   $("app").hidden = true; $("loginView").hidden = true; $("deniedView").hidden = false;
   ["loginEmail", "loginPass"].forEach(id => { $(id).value = ""; });
   setTimeout(() => { try { location.replace("about:blank"); } catch (_) {} }, 2500);
 }
-function deviceDenied() { return Number(lsGet(LS.denied) || 0) > Date.now(); }
+function deviceDenied() { return deniedInfo().u > Date.now(); }
+// Device is blocked: if the admin has unlocked that login since, lift the block.
+async function deviceUnlockedByAdmin() {
+  const d = deniedInfo();
+  if (!(d.u > Date.now()) || !d.e || !sb) return false;
+  try {
+    const r = await sb.rpc("login_check", { p_email: d.e });
+    if (!r.error && r.data === false) { lsDel(LS.denied); lsDel(LS.fails); return true; }
+  } catch (_) {}
+  return false;
+}
 
 // Empty every form on screen (used at sign-out so the next person sees nothing).
 function clearForms() {
@@ -1374,7 +1403,7 @@ $("loginForm").addEventListener("submit", async e => {
   $("loginErr").textContent = ""; $("loginBtn").disabled = true;
   try {
     const lk = await sb.rpc("login_check", { p_email: email });
-    if (!lk.error && lk.data === true) { denyAccess(); return; }
+    if (!lk.error && lk.data === true) { denyAccess(email); return; }
     S.justSignedIn = true;
     $("loginPass").value = "";
     const { error } = await sb.auth.signInWithPassword({ email, password: pass });
@@ -1388,7 +1417,7 @@ $("loginForm").addEventListener("submit", async e => {
     const devFails = (dev.d === todayISO() ? num(dev.n) : 0) + 1;
     lsSet(LS.fails, JSON.stringify({ d: todayISO(), n: devFails }));
     const left = Math.min(r.error ? 3 : num(r.data), 3 - devFails);
-    if (left <= 0) { lsDel(LS.fails); denyAccess(); return; }
+    if (left <= 0) { lsDel(LS.fails); denyAccess(email); return; }
     $("loginPass").value = ""; $("loginPass").focus();
     $("loginErr").textContent = `Email or password is wrong. ${left} attempt${left === 1 ? "" : "s"} left.`;
   } finally { $("loginBtn").disabled = false; }
@@ -1438,7 +1467,7 @@ async function init() {
   }
   try { const l = document.createElement("link"); l.rel = "preconnect"; l.href = new URL(cfg.SUPABASE_URL).origin; l.crossOrigin = ""; document.head.appendChild(l); } catch (_) {}
   sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
-  if (deviceDenied()) { denyAccess(); return; }
+  if (deviceDenied() && !(await deviceUnlockedByAdmin())) { denyAccess(); return; }
   let current = null;
   sb.auth.onAuthStateChange((_evt, session) => {
     const id = session ? session.user.id : null;
